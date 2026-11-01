@@ -1,0 +1,4 @@
+# dsh-plc-decode：一个插件行，注册 12 个分析工具与 11 个斜杠命令。
+- insert:
+    - id: dsh-plc-decode
+      name: dsh-plc-decode

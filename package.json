@@ -1,0 +1,55 @@
+{
+  "name": "dsh-plc-decode",
+  "version": "0.1.0",
+  "description": "在 DSH 里读 PLC 工程文件：CoDeSys .project、台达 .dvp、西门子 S7-200 SMART .smart/.smartlib 统一解码成可读报告与结构化数据，另带新旧工程对比、地址体检与连线还原。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./invariant": "./invariant.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "invariant.js",
+    "cordis.patch.yml",
+    "assets",
+    "scripts",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "plc",
+    "siemens",
+    "s7-200-smart",
+    "codesys",
+    "delta-dvp",
+    "ladder",
+    "industrial-automation"
+  ],
+  "scripts": {
+    "smoke": "node scripts/smoke.mjs",
+    "check": "node --check index.js && node --check invariant.js && node --check assets/decode-pack.mjs && node --check assets/smart-lad.mjs && node --check assets/smart-net-trace.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode"
+  },
+  "homepage": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode#readme",
+  "bugs": {
+    "url": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode/issues"
+  }
+}
