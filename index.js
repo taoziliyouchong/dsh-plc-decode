@@ -173,7 +173,7 @@ function requireProject(proj, usage) {
   if (!isZip && !isDvp) {
     throw new Error(
       `不是可识别的 PLC 工程文件（前 4 字节: ${[...head].map(b => b.toString(16).padStart(2, '0')).join(' ')}）: ${proj}\n`
-      + '支持两种: .project（CoDeSys V3.5 ZIP 容器，LeadSys Studio 保存产生）；\n'
+      + '支持两种: .project（CoDeSys V3.5 ZIP 容器，雷赛 LeadSys Studio 保存产生）；\n'
       + '         .dvp（台达 WPLSoft/ISPSoft 工程，57 01 01 00 头）。\n'
       + '提示: .i6x / .coppkg / .rar 等是 IDE 安装包或设备包，不是可解码的 PLC 工程。'
     )
@@ -2591,7 +2591,7 @@ export function apply(ctx) {
   // ── 工具一：统一入口（四格式自动识别分发）──
   ctx.tools.register({
     name: 'plc-decode',
-    description: 'PLC 工程文件统一解码入口：自动识别四格式并分发解码——.project(CoDeSys/LeadSysStudio ZIP)、.dvp(台达 WPLSoft/ISPSoft)、.smart(西门子 S7-200 SMART 工程)、.smartlib(西门子 SMART 库)。提供任一 PLC 工程文件、要求读取/理解/核对其中程序时调用。触摸屏工程（.hmismart/.fsprj）不在本插件范围，用 HMI 解码工具。只读，不改动工程文件。',
+    description: 'PLC 工程文件统一解码入口：自动识别四格式并分发解码——.project(CoDeSys/LeadSysStudio，含雷赛 ZIP)、.dvp(台达 WPLSoft/ISPSoft)、.smart(西门子 S7-200 SMART 工程)、.smartlib(西门子 SMART 库)。提供任一 PLC 工程文件、要求读取/理解/核对其中程序时调用。触摸屏工程（.hmismart/.fsprj）不在本插件范围，用 HMI 解码工具。只读，不改动工程文件。',
     parameters: {
       type: 'object',
       properties: {

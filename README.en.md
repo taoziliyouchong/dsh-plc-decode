@@ -8,10 +8,12 @@ Read PLC project files directly inside [DeepSeek Harness](https://github.com/dee
 
 | Header | Format | Decoder |
 |---|---|---|
-| `50 4B 03 04` (ZIP) | CoDeSys V3.5 / LeadSysStudio `.project` | Bundled Python script: unpack → string table → restore POU ST sources |
+| `50 4B 03 04` (ZIP) | CoDeSys V3.5 / LeadSysStudio `.project` (incl. Leadshine) | Bundled Python script: unpack → string table → restore POU ST sources |
 | `57 01 01 00` | Delta WPLSoft / ISPSoft `.dvp` | Bundled Python script: structure / section comments / device comments / instruction table |
 | `53 48 33 00` (SH3) | Siemens S7-200 SMART `.smart` | Embedded Node decoder: blocks / instruction records / operands / user & system symbol tables |
 | `44 45 4D 00` (DEM) | Siemens S7-200 SMART `.smartlib` | Embedded Node decoder: library variables and comment stream |
+
+> Leadshine LeadSysStudio saves CoDeSys-format `.project` files, so they decode through the same path: ST sources go to `pous/<POU>.txt`, and `/codesys-check` runs an equivalent compile check (struct members, array bounds, calls, address uniqueness, undeclared symbols).
 
 ## Install
 

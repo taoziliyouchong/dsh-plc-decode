@@ -10,10 +10,12 @@
 
 | 文件头 | 格式 | 解码方式 |
 |---|---|---|
-| `50 4B 03 04`（ZIP） | CoDeSys V3.5 / LeadSysStudio `.project` | 自带 Python 脚本：解包 → 字符串表 → 逐对象恢复 POU ST 源码 |
+| `50 4B 03 04`（ZIP） | CoDeSys V3.5 / LeadSysStudio `.project`（含雷赛） | 自带 Python 脚本：解包 → 字符串表 → 逐对象恢复 POU ST 源码 |
 | `57 01 01 00` | 台达 WPLSoft / ISPSoft `.dvp` | 自带 Python 脚本：文件结构 / 段落注释 / 设备注释 / 指令表反汇编 |
 | `53 48 33 00`（SH3） | 西门子 S7-200 SMART `.smart` 工程 | 内嵌 Node 解码器：块 / 指令记录 / 操作数 / 用户与系统符号表 |
 | `44 45 4D 00`（DEM） | 西门子 S7-200 SMART `.smartlib` 库 | 内嵌 Node 解码器：库变量与注释流 |
+
+> 雷赛（Leadshine）用 LeadSysStudio 保存的 `.project` 与 CoDeSys 同格式，走同一条解码链：ST 源码导出到 `pous/<POU>.txt`，可用 `/codesys-check` 做等价编译校验（结构体成员、数组下标、调用存在性、地址唯一、未声明符号）。
 
 ## 安装
 
