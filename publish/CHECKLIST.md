@@ -22,7 +22,7 @@ npm pack --dry-run
 
 ## 1. 建 GitHub 仓库
 
-- 公开仓库，名字用 `dafeiyu_dsh_plc_decode`；包名是 `dsh-plc-decode`，两者可以不同。
+- 公开仓库与 npm 包同名：仓库 `dsh-plc-decode`，包名 `dsh-plc-decode`。
 - 推送本目录内容（`node_modules/`、`*.tgz` 已被 `.gitignore` 排除；仓库里不要带工程文件与解码产物）。
 - 给仓库加 topic：`dsh-plugin`（收录检查会看）。
 
@@ -38,7 +38,7 @@ npm pack --dry-run
 npm publish --access public
 ```
 
-不发布 npm 也能被收录：安装命令可以走 GitHub（`dsh plugin --profile web add github:taoziliyouchong/dafeiyu_dsh_plc_decode`）。发布 npm 的好处是市场能做版本更新检查。
+不发布 npm 也能被收录：安装命令可以走 GitHub（`dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode`）。发布 npm 的好处是市场能做版本更新检查。
 
 ## 4. 提交目录收录
 

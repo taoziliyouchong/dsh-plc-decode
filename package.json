@@ -49,10 +49,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode"
+    "url": "https://github.com/taoziliyouchong/dsh-plc-decode"
   },
-  "homepage": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode#readme",
+  "homepage": "https://github.com/taoziliyouchong/dsh-plc-decode#readme",
   "bugs": {
-    "url": "https://github.com/taoziliyouchong/dafeiyu_dsh_plc_decode/issues"
+    "url": "https://github.com/taoziliyouchong/dsh-plc-decode/issues"
   }
 }

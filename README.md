@@ -28,7 +28,7 @@
 从 GitHub 安装：
 
 ```sh
-dsh plugin --profile web add github:taoziliyouchong/dafeiyu_dsh_plc_decode
+dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 ```
 
 装完重启 DSH。本插件没有 npm 运行时依赖。

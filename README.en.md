@@ -24,7 +24,7 @@ Prerequisites:
 - Python is not needed for `.smart` / `.smartlib`.
 
 ```sh
-dsh plugin --profile web add github:taoziliyouchong/dafeiyu_dsh_plc_decode
+dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 ```
 
 Restart DSH afterwards. The plugin has no npm runtime dependencies.
