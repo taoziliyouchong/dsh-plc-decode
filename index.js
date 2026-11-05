@@ -20,12 +20,28 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, join, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import z from '@deepseek-ai/schemastery'
 import { writeSmartPack, writeSourcePack } from './assets/decode-pack.mjs'
 
 export const name = 'dsh-plc-decode'
 export const inject = ['tools', 'commands', 'shell', 'sandboxPolicy']
+
+/** 插件配置（DSH 官方 Config 机制：cordis.patch.yml 里本插件行的 config 传进 apply）。
+ *  2026-11-05 加：让装插件的人不改代码就能换解码产物的存放位置。 */
+export const Config = z.object({
+  archiveDir: z.string().default('解码归档')
+    .description('解码产物归档根目录。相对路径按当前会话工作区解析，绝对路径原样使用。默认「解码归档」。'),
+})
+
+/** 生效中的归档根目录；apply 时由 config.archiveDir 覆盖，未配置即默认值（与旧版行为一致）。 */
+let ARCHIVE_ROOT = '解码归档'
+
+/** 归档根目录的绝对路径：绝对路径原样用，相对路径拼会话工作区。 */
+function archiveRootPath(base) {
+  return isAbsolute(ARCHIVE_ROOT) ? ARCHIVE_ROOT : join(base || process.cwd(), ARCHIVE_ROOT)
+}
 
 const PY = 'python'
 const TIMEOUT_MS = 300_000
@@ -72,7 +88,7 @@ function defaultArchiveDir(file, base) {
     const siblings = readdirSync(dir).filter((n) => /\.(smart|smartlib|dvp|project)$/i.test(n))
     if (siblings.length > 1) name = `${folder}_${stem}`
   } catch { /* 读不到目录就退回文件名 */ }
-  return join(base || process.cwd(), '解码归档', name)
+  return join(archiveRootPath(base), name)
 }
 
 /** 把命令名后的原始输入按 shell 引号规则切成参数（支持带空格路径）。 */
@@ -105,7 +121,7 @@ async function shellResult(ctx, spec) {
 
 /** 通过 ctx.shell 前台运行一个 Python 脚本（继承会话沙箱策略 + WinError 5 重试一次）。 */
 async function runPy(ctx, script, args, workdir, signal, exec) {
-  const cmd = `& ${PY} ${psq(join(CODESYS_TOOLS_DIR, script))} ${args.map(psq).join(' ')}`
+  const cmd = `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(join(CODESYS_TOOLS_DIR, script))} ${args.map(psq).join(' ')}`
   const policy = ctx.sandboxPolicy && exec && exec.agent
     ? ctx.sandboxPolicy.resolve({ session: exec.agent.session })
     : undefined
@@ -197,9 +213,10 @@ function requireDvp(dvp, usage) {
   return abs
 }
 
-/** 预建输出目录及其子目录（治 WinError 5：目录存在时 python makedirs exist_ok 不再报错）。 */
-function precreateOutDir(outd) {
-  for (const sub of ['', 'extracted', 'pous']) {
+/** 预建输出目录及其子目录（治 WinError 5：目录存在时 python makedirs exist_ok 不再报错）。
+ *  2026-11-05：dvp 产物只有「解码报告.md」，不再为它建 extracted/、pous/ 两个空目录。 */
+function precreateOutDir(outd, kind = 'project') {
+  for (const sub of kind === 'dvp' ? [''] : ['', 'extracted', 'pous']) {
     try { mkdirSync(join(outd, sub), { recursive: true }) } catch { /* 留给 python */ }
   }
 }
@@ -209,7 +226,7 @@ function precreateOutDir(outd) {
 async function decodeCodesysProject(ctx, projPath, signal, exec, outDir, base) {
   const { abs, dir, kind } = requireProject(projPath, '需要一个 .project / .dvp 工程文件路径（带空格请加引号）')
   const outd = outDir || defaultArchiveDir(abs, base)
-  precreateOutDir(outd)
+  precreateOutDir(outd, kind)
   const result = kind === 'dvp'
     ? await runPy(ctx, 'dvp_decode.py', [abs, '-o', outd], dir, signal, exec)
     : await runPy(ctx, 'read_project.py', [abs, outd], dir, signal, exec)
@@ -2587,7 +2604,11 @@ async function runDiff(ctx, oldP, newP, signal, base) {
 
 // ───────────────────────── 应用注册 ─────────────────────────
 
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
+  // 2026-11-05：读插件配置的归档根目录（config.archiveDir）。不配置时保持旧行为不变。
+  const cfg = config && typeof config === 'object' ? config : {}
+  if (typeof cfg.archiveDir === 'string' && cfg.archiveDir.trim()) ARCHIVE_ROOT = cfg.archiveDir.trim()
+
   // ── 工具一：统一入口（四格式自动识别分发）──
   ctx.tools.register({
     name: 'plc-decode',
@@ -2596,7 +2617,7 @@ export function apply(ctx) {
       type: 'object',
       properties: {
         file: { type: 'string', description: 'PLC 工程文件路径（.project/.dvp/.smart/.smartlib，绝对路径或相对当前工作目录）。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省写到工作区「解码归档\\<工程文件名>\\」（四格式一致，不写工程目录）。' },
+        outDir: { type: 'string', description: '可选：输出目录；缺省写到「<归档根>\\<工程所在文件夹名>\\」（归档根默认「解码归档」，可用插件配置 archiveDir 改，见 /plc-archive；四格式一致，不写工程目录）。' },
       },
       required: ['file'],
       additionalProperties: false,
@@ -2732,7 +2753,7 @@ export function apply(ctx) {
       properties: {
         old: { type: 'string', description: '旧工程 .smart 文件路径（绝对路径或相对工作目录）。' },
         new: { type: 'string', description: '新工程 .smart 文件路径。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省写到工作区「解码归档\\<新工程文件名>\\」。' },
+        outDir: { type: 'string', description: '可选：输出目录；缺省写到「<归档根>\\<新工程所在文件夹名>\\」（归档根默认「解码归档」，可用插件配置 archiveDir 改）。' },
       },
       required: ['old', 'new'],
       additionalProperties: false,
@@ -3195,6 +3216,28 @@ export function apply(ctx) {
   })
 
   // ── 命令 ──
+  ctx.commands.register({
+    name: 'plc-archive',
+    description: '查看解码归档地址：当前生效的根目录、默认落点、怎么改配置',
+    input: { hint: '（无参数）' },
+    handler: async () => ({
+      kind: 'success',
+      text: [
+        `当前生效的归档根目录: ${ARCHIVE_ROOT}`,
+        `解析方式: ${isAbsolute(ARCHIVE_ROOT) ? '绝对路径，原样使用' : `相对路径，按会话工作区解析（本进程 cwd = ${process.cwd()}）`}`,
+        '默认落点: <归档根>\\<工程文件所在文件夹名>\\（同一文件夹里有多个工程文件时用 <文件夹名>_<文件名>）',
+        '',
+        '改配置（改完重启 dsh 生效）：在 DSH profile 的 cordis.patch.yml 里给本插件那行加 config：',
+        '  - id: dsh-plc-decode',
+        '    name: dsh-plc-decode',
+        '    config:',
+        '      archiveDir: D:/plc/解码归档',
+        '',
+        '只改这一次、不写配置：解码时传 outDir 参数（工具参数或 /plc-decode 的第二个参数）。',
+      ].join('\n'),
+    }),
+  })
+
   ctx.commands.register({
     name: 'plc-decode',
     description: 'PLC 工程统一解码入口（自动识别 .project/.dvp/.smart/.smartlib）',

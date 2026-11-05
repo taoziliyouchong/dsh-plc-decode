@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { apply, inject, name as pluginName } from '../index.js'
 
 const EXPECTED_TOOLS = 12
-const EXPECTED_COMMANDS = 11
+const EXPECTED_COMMANDS = 12
 
 let failed = 0
 const pass = (m) => console.log(`  ok   ${m}`)
@@ -32,7 +32,8 @@ const INDEX_FILES = {
 
 /**
  * 用子进程代替 DSH 的 shell 服务：插件只依赖 resolve/execute/result 三个方法，
- * 这里把命令交给 PowerShell 执行，输出按 GBK 解码（与 DSH shell 服务行为一致）。
+ * 这里把命令交给 PowerShell 执行。插件在 runPy 里钉了 PYTHONIOENCODING=utf-8，
+ * python 输出是 UTF-8，所以这里也按 UTF-8 解码（2026-11-05 前是 GBK）。
  */
 function createShell() {
   return {
@@ -43,14 +44,14 @@ function createShell() {
         ['-NoProfile', '-NonInteractive', '-Command', spec.command],
         { cwd: spec.workdir || process.cwd(), timeout: spec.timeoutMs, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' },
       )
-      const gbk = new TextDecoder('gb18030')
+      const utf8 = new TextDecoder('utf-8')
       return {
         result: async () => ({
           exitCode: r.status ?? 1,
           timedOut: r.error?.code === 'ETIMEDOUT',
           aborted: false,
-          stdout: { text: gbk.decode(r.stdout ?? Buffer.alloc(0)) },
-          stderr: { text: gbk.decode(r.stderr ?? Buffer.alloc(0)) },
+          stdout: { text: utf8.decode(r.stdout ?? Buffer.alloc(0)) },
+          stderr: { text: utf8.decode(r.stderr ?? Buffer.alloc(0)) },
         }),
       }
     },

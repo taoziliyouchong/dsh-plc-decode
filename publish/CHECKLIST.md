@@ -6,7 +6,7 @@
 
 ```sh
 npm run check                  # 五个 JS 文件语法检查
-npm run smoke                  # 装载插件 + 核对注册面（工具 12 / 命令 11）
+npm run smoke                  # 装载插件 + 核对注册面（工具 12 / 命令 12）
 npm run smoke -- "D:\path\to\machine.smart"   # 拿一份真实工程跑端到端解码
 ```
 
@@ -61,7 +61,7 @@ npm publish --access public
 | 要求 | 本仓库状态 |
 |---|---|
 | `package.json` 声明 `dsh.bundle.patch` | 已声明，指向 `cordis.patch.yml` |
-| 仓库有真实可用代码 | 有（四格式解码；12 个工具 = 1 个统一入口 + 11 个分析工具；11 个命令） |
+| 仓库有真实可用代码 | 有（四格式解码；12 个工具 = 1 个统一入口 + 11 个分析工具；12 个命令） |
 | 仓库满 1 天 | 建库后次日再提 PR |
 | 加 `dsh-plugin` topic | 建库时加 |
 | 描述只说功能、不夸大 | `registry-entry.yml` 已按实际能力写 |

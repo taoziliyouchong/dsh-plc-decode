@@ -58,6 +58,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | 命令 | 用途 |
 |---|---|
 | `/plc-decode <文件> [输出目录]` | 统一解码入口 |
+| `/plc-archive` | 查看当前生效的解码归档根目录、默认落点与改配置的方法 |
 | `/codesys-read <工程>` | 解码 `.project`（ST 源码 + 报告）或 `.dvp`（解码报告） |
 | `/dvp-read <工程>` | 台达 DVP 结构与指令表报告 |
 | `/smart-read <.smart/.smartlib> [输出目录]` | SMART 工程 / 库解码 |
@@ -72,6 +73,19 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 ## 输出位置
 
 默认写到**工作区**的 `解码归档/<工程所在文件夹名>/`（用文件夹名而不是工程文件名，避免不同文件夹里的同名工程互相覆盖；同一文件夹里有多个工程文件时用 `文件夹名_工程名`）。也可以在工具参数里用 `outDir` 指定。
+
+### 改归档地址（不用改代码）
+
+在 DSH profile 的 `cordis.patch.yml` 里给本插件那行加 `config`：
+
+```yaml
+- id: dsh-plc-decode
+  name: dsh-plc-decode
+  config:
+    archiveDir: D:/plc/解码归档
+```
+
+`archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值。只想改一次就在解码时传 `outDir`。
 
 | 格式 | 主要产物 |
 |---|---|
@@ -93,7 +107,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 ```sh
 npm run check                 # 语法检查
-npm run smoke                 # 装载插件 + 核对注册面（工具 12 个 / 命令 11 个）
+npm run smoke                 # 装载插件 + 核对注册面（工具 12 个 / 命令 12 个）
 npm run smoke -- <工程文件>    # 额外对一个真实工程跑端到端解码，核对产物落盘
 npm pack --dry-run            # 看包里内容（node_modules、publish/ 不应进包）
 ```

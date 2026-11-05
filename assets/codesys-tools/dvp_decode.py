@@ -109,6 +109,11 @@ COMPACT_TYPES = {0x05: "M", 0x09: "X", 0x0A: "Y",
 # 行号索引前缀（保留吞 5B 语义）：14/16 为行号标记
 ROWIDX_PREFIX = {0x14, 0x16}
 
+# 2026-11-05：认不出的记录台账。disasm 每跳一条未识别记录就往这里记一笔
+# （段号, 行号, 字节原文），main 末尾聚合成「未识别记录」一节。
+# 这不是猜语义，是把「读不出来」变成看得见的账——用户能据此对照 WPLSoft 指令表。
+UNKNOWN_RECS = []
+
 # 触点/线圈指令前缀：
 #   12 触点族（LD/AND/T 页）、32=OUT、22=AND/ANI
 #   B 系（B4/B6/B2/B9）= ANDP（上升沿，置位侧）
@@ -126,8 +131,11 @@ COMPACT_NAMES = {
     (0x16, 0x05): "LD", (0x16, 0x0A): "LD", (0x16, 0x19): "LD",
 }
 # B/C 系沿触点：B=ANDP、C=ANDF，全类型页
+# 2026-11-05：B 系补 0x07（T 页）/ 0x1A（Y 页）——C 系早就有 0x1A 的实证注释，
+# B 系漏页会让上升沿触点整条消失；本机 16 份工程实测 B 系出现类型页 {05,07,09,15,17,19,1A}，
+# 其中 0x17 页语义未定，暂不映射（宁缺不猜），其余补齐。
 for _p in (0xB4, 0xB6, 0xB2, 0xB9):
-    for _t in (0x05, 0x09, 0x0A, 0x15, 0x19):
+    for _t in (0x05, 0x07, 0x09, 0x0A, 0x15, 0x19, 0x1A):
         COMPACT_NAMES[(_p, _t)] = "ANDP"
 for _p in (0xC6, 0xC9, 0xC2, 0xC4):
     for _t in (0x05, 0x09, 0x0A, 0x15, 0x19, 0x1A):
@@ -320,7 +328,7 @@ def _to_loading(cp):
     return cp
 
 
-def disasm(seg):
+def disasm(seg, segno=0):
     """段数据区 → 行分组指令 token 流
     - 比较指令族 ?CMP（e2/e4/e6/e9 + 双操作数，指令名待对照，统一 ? 前缀）
     - 行尾/分隔记录整体吞 5B（0b/61 10/68 10/57 10/5a/34/39）
@@ -358,12 +366,11 @@ def disasm(seg):
             elif b == 0x0b:
                 # 0b 00 00 00 00 ＝ ORB（与指令表逐条对得上；紧随其后的全零记录是 ANB）
                 toks.append('ORB'); i += 5
-            elif b == 0x56:
-                toks.append("MPS"); i += 1
-            elif b == 0x59:
-                toks.append("MRD"); i += 1
-            elif b == 0x54:
-                toks.append("MPP"); i += 1
+            elif b in (0x56, 0x59, 0x54):
+                # 2026-11-05：栈指令记录是完整 5 字节（实测 `56 10 00 00 00` / `59 00 00 00 00`
+                # / `54 10 00 00 00`），旧版 i += 1 把后 4 字节留进主循环：第 2 字节 0x10
+                # 会被当作未知记录，尾字节不是 0x00 时只跳 1 字节 → 后续记录整体错位。
+                toks.append({0x56: "MPS", 0x59: "MRD", 0x54: "MPP"}[b]); i += 5
             elif b == 0x90:
                 # 0x90 记录携带 32 位数据的**高位字**（rec[4]=0x10 表示后面还有操作数）。
                 # 高位字要并进前一个常数（如 K34463 + H1 = K99999），
@@ -371,16 +378,28 @@ def disasm(seg):
                 hi = rec[2] | (rec[3] << 8)
                 m = re.match(r'^([KH])([0-9A-F]+)$', toks[-1]) if toks else None
                 if hi and m:
+                    kind, digits = m.group(1), m.group(2)
                     try:
-                        toks[-1] = f"{m.group(1)}{int(m.group(2)) + (hi << 16)}"
+                        # 2026-11-05：①H 型常数内部存的是十六进制，旧版按十进制 int() 解析
+                        # 要么 ValueError（整条不拼）要么算错；②K 是 32 位有符号——高半字
+                        # 全 1 时是负数，旧版无符号拼接把 K-200000 显示成 K4294767296。
+                        val = int(digits, 16 if kind == 'H' else 10) + (hi << 16)
+                        if kind == 'K' and val >= 0x80000000:
+                            val -= 0x100000000
+                        toks[-1] = f"H{format(val, 'X')}" if kind == 'H' else f"K{val}"
                         i += 5
                         continue
                     except ValueError:
                         pass
                 toks.append(f"|H{hi}|" if hi else "|")
                 i += 5
-            elif b == 0x42:
-                if rec[2] == 0x18:
+            elif b in (0x42, 0x44, 0x49):
+                # 2026-11-05：0x44 / 0x49 是与 0x42 同形的功能指令记录——同为 5 字节，
+                # rec[2] 是功能码，直接查同一张 CMD_MAP/GUESS_CMD（实证 9 条全部对上：
+                #   44 10 5D 01 10 → 码 5D = DDRVI；44 10 00 D0 00 / 49 00 00 D0 00 → 码 00 = SET；
+                #   49 00 29 00 10 → 码 29 = DMOV）。
+                # 旧版不认这两种，尾字节 0x10 的记录落进 else 逐字节跳 → 整条指令名丢失且错位。
+                if b == 0x42 and rec[2] == 0x18:
                     # 段首非程序记录（不在任何网络里、无操作数），不是指令，整体吞 5B
                     i += 5
                     continue
@@ -420,7 +439,12 @@ def disasm(seg):
                             # 未识别记录若是标准 5 字节外形（尾字节 00），整吞，
                             # 不再逐字节跳：逐字节跳会让**后续所有记录整体错位**，
                             # 是指令序列与软件对不上的主要来源。
-                            i += 5 if rec[4] == 0x00 else 1
+                            # 2026-11-05：同时记进台账 + 行内留痕，不再静默消失。
+                            step = 5 if rec[4] == 0x00 else 1
+                            UNKNOWN_RECS.append((segno, li, rec[:step].hex(' ')))
+                            if step == 5:
+                                toks.append(f"〔?{rec[0]:02x}{rec[1]:02x}{rec[2]:02x}〕")
+                            i += step
         rows.append(" ".join(toks))
     return rows
 
@@ -436,6 +460,7 @@ def main():
 
     data = read_bytes(path)
     text = data.decode("ascii", "replace")
+    UNKNOWN_RECS.clear()
     lines = []
 
     # ---- 1. 结构 ----
@@ -514,10 +539,29 @@ def main():
                 spans.append((0, de0 + len("<DataEnd>"), nxt))
                 lines.append("  (本工程无 <SMT> 分段标记，按 Initial Value 块后的整块数据反汇编)")
     for si, ds, de in spans:
-        rows = disasm(data[ds:de])
+        rows = disasm(data[ds:de], si)
         lines.append(f"--- 段{si} ---")
         for li, r in enumerate(rows):
             lines.append(f"  行{li}: {r}")
+
+    # ---- 4.5 未识别记录台账 ----
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("【未识别记录（认不出→已跳过；指令表里缺的东西在这里查）】")
+    lines.append("=" * 60)
+    if not UNKNOWN_RECS:
+        lines.append("  无：本次解码的 5 字节记录全部落进已知指令/触点/操作数/填充。")
+    else:
+        agg = {}
+        for sg, li, hx in UNKNOWN_RECS:
+            agg.setdefault(hx, []).append((sg, li))
+        lines.append(f"  共 {len(UNKNOWN_RECS)} 条（{len(agg)} 种字节形态）：")
+        for hx, pos in sorted(agg.items(), key=lambda kv: -len(kv[1])):
+            where = "、".join(f"段{a}行{b}" for a, b in pos[:6])
+            more = f" 等 {len(pos)} 处" if len(pos) > 6 else ""
+            lines.append(f"  ×{len(pos):<4} {hx:<15} 首见 {where}{more}")
+        lines.append("  这些字节没被认成指令或触点，对应行里可能少了一条——拿字节形态去 WPLSoft")
+        lines.append("  指令表对照；核出来再补 COMPACT_NAMES / CMD_MAP，别按猜测直接补。")
 
     # ---- 5. 推断对照表 ----
     lines.append("")
