@@ -1,6 +1,6 @@
 {
   "name": "dsh-plc-decode",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "在 DSH 里读 PLC 工程文件：CoDeSys .project、台达 .dvp、西门子 S7-200 SMART .smart/.smartlib 统一解码成可读报告与结构化数据，另带新旧工程对比、地址体检与连线还原。",
   "type": "module",
   "main": "index.js",

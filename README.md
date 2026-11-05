@@ -74,9 +74,15 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 默认写到**工作区**的 `解码归档/<工程所在文件夹名>/`（用文件夹名而不是工程文件名，避免不同文件夹里的同名工程互相覆盖；同一文件夹里有多个工程文件时用 `文件夹名_工程名`）。也可以在工具参数里用 `outDir` 指定。
 
+| 格式 | 主要产物 |
+|---|---|
+| `.project` | `00-索引.md`（先读这份）、`pous/<POU>.txt`（ST 源码）、`工程内容报告.md`、`全部字符串.txt`、`对象表.md`、`项目树.md` |
+| `.dvp` | `00-索引.md`、`解码报告.md`（结构 / 段落注释 / 设备注释 / 指令表）、可选 `程序解读.md` |
+| `.smart` / `.smartlib` | `00-目录.md`（先读这份）、`解码报告.md`、`程序.lad`、`元素记录.tsv`、`符号地址.tsv`、`分析.md`、`记录.json`、`字符串全录.txt` |
+
 ### 改归档地址（不用改代码）
 
-在 DSH profile 的 `cordis.patch.yml` 里给本插件那行加 `config`：
+在 DSH profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`）末尾加这几行：
 
 ```yaml
 - id: dsh-plc-decode
@@ -85,13 +91,14 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
     archiveDir: D:/plc/解码归档
 ```
 
-`archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值。只想改一次就在解码时传 `outDir`。
+`archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值；只想改一次就在解码时传 `outDir`。
 
-| 格式 | 主要产物 |
+实测同一份 `Dvp0.dvp` 在两种配置下的落点：
+
+| cordis.patch.yml | 解码落点 |
 |---|---|
-| `.project` | `00-索引.md`（先读这份）、`pous/<POU>.txt`（ST 源码）、`工程内容报告.md`、`全部字符串.txt`、`对象表.md`、`项目树.md` |
-| `.dvp` | `00-索引.md`、`解码报告.md`（结构 / 段落注释 / 设备注释 / 指令表）、可选 `程序解读.md` |
-| `.smart` / `.smartlib` | `00-目录.md`（先读这份）、`解码报告.md`、`程序.lad`、`元素记录.tsv`、`符号地址.tsv`、`分析.md`、`记录.json`、`字符串全录.txt` |
+| 不写 `config` | `<工作区>\解码归档\靖昇20250212ZH1035\` |
+| `archiveDir: D:/plc/解码归档` | `D:\plc\解码归档\靖昇20250212ZH1035\` |
 
 `.smart` 的 `记录.json` 同时是各分析工具（地址占用、变量使用等）的输入，也是识别「已解码目录」的凭据；解码报告头部带**源文件指纹**（文件大小 + 修改时间），工程换版本后先核对指纹再用旧报告。
 
