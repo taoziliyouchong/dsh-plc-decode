@@ -93,13 +93,6 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 `archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值；只想改一次就在解码时传 `outDir`。
 
-实测同一份 `Dvp0.dvp` 在两种配置下的落点：
-
-| cordis.patch.yml | 解码落点 |
-|---|---|
-| 不写 `config` | `<工作区>\解码归档\靖昇20250212ZH1035\` |
-| `archiveDir: D:/plc/解码归档` | `D:\plc\解码归档\靖昇20250212ZH1035\` |
-
 `.smart` 的 `记录.json` 同时是各分析工具（地址占用、变量使用等）的输入，也是识别「已解码目录」的凭据；解码报告头部带**源文件指纹**（文件大小 + 修改时间），工程换版本后先核对指纹再用旧报告。
 
 ## 已知边界
