@@ -1,7 +1,7 @@
 {
   "name": "dsh-plc-decode",
-  "version": "0.1.5",
-  "description": "在 DSH 里读 PLC 工程文件：CoDeSys、台达、西门子 SMART 工程里的程序与变量，读成能看的报告。",
+  "version": "0.2.0",
+  "description": "在 DSH 里读工控工程文件：PLC（CoDeSys、台达、西门子 SMART）与触摸屏（西门子 WinCC flexible SMART、繁易 FStudio、欧姆龙 NB、昆仑通态 MCGS）里的程序、画面、控件、变量与地址，读成能查的报告与表。",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -11,6 +11,7 @@
   },
   "files": [
     "index.js",
+    "hmi.js",
     "invariant.js",
     "cordis.patch.yml",
     "assets",
@@ -38,6 +39,13 @@
     "codesys",
     "delta-dvp",
     "ladder",
+    "hmi",
+    "touchscreen",
+    "wincc-flexible-smart",
+    "fstudio",
+    "omron",
+    "nb-designer",
+    "mcgs",
     "industrial-automation",
     "leadshine",
     "leadsysstudio",
@@ -45,7 +53,7 @@
   ],
   "scripts": {
     "smoke": "node scripts/smoke.mjs",
-    "check": "node --check index.js && node --check invariant.js && node --check assets/decode-pack.mjs && node --check assets/smart-lad.mjs && node --check assets/smart-net-trace.mjs"
+    "check": "node --check index.js && node --check hmi.js && node --check invariant.js && node --check assets/decode-pack.mjs && node --check assets/hmismart-decode.mjs && node --check assets/hmismart-diff.mjs && node --check assets/hmismart-report.mjs && node --check assets/nb-decode.mjs && node --check assets/mcgs-decode.mjs && node --check assets/smart-lad.mjs && node --check assets/smart-net-trace.mjs"
   },
   "author": "taoziliyouchong",
   "license": "MIT",

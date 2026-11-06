@@ -1,4 +1,6 @@
-# dsh-plc-decode：一个插件行，注册 12 个分析工具与 11 个斜杠命令。
+# dsh-plc-decode：一个插件行，注册 PLC 解码与触摸屏解码两类工具。
+# PLC：统一入口、SMART 子程序结构、新旧对比、地址体检、连线还原等。
+# HMI：触摸屏统一入口（.hmismart / .fsprj / .nbp / .mcp）、新旧对比、FStudio 文本与多语言、WinCC 项目文本。
 - insert:
     - id: dsh-plc-decode
       name: dsh-plc-decode

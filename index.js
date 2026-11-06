@@ -24,9 +24,13 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { writeSmartPack, writeSourcePack } from './assets/decode-pack.mjs'
+import { registerHmi } from './hmi.js'
 
 export const name = 'dsh-plc-decode'
-export const inject = ['tools', 'commands', 'shell', 'sandboxPolicy']
+export const inject = ['skills', 'tools', 'commands', 'shell', 'sandboxPolicy']
+
+/** 报错尾行：插件出问题时，使用者第一眼看的就是错误文本。 */
+const FEEDBACK_HINT = '遇到问题：加 QQ 号 2171960697，或开 Issue https://github.com/taoziliyouchong/dsh-plc-decode/issues'
 
 /** 插件配置（DSH 官方 Config 机制：cordis.patch.yml 里本插件行的 config 传进 apply）。
  *  2026-11-05 加：让装插件的人不改代码就能换解码产物的存放位置。 */
@@ -2609,6 +2613,9 @@ export function apply(ctx, config = {}) {
   const cfg = config && typeof config === 'object' ? config : {}
   if (typeof cfg.archiveDir === 'string' && cfg.archiveDir.trim()) ARCHIVE_ROOT = cfg.archiveDir.trim()
 
+  // 触摸屏（HMI）工程解码：画面/控件/变量/地址，与 PLC 侧共用同一插件行（hmi.js）。
+  registerHmi(ctx)
+
   // ── 工具一：统一入口（四格式自动识别分发）──
   ctx.tools.register({
     name: 'plc-decode',
@@ -3210,7 +3217,7 @@ export function apply(ctx, config = {}) {
         if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw new Error('第二个参数应是地址，或给出"起hex 止hex"')
         return { kind: 'success', text: `梯形图元素序列（${basename(abs)}）:\n${ladderElementsRange(data, from, to)}` }
       } catch (error) {
-        return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        return { kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT }
       }
     },
   })
@@ -3259,7 +3266,7 @@ export function apply(ctx, config = {}) {
         const result = kind === 'smart' ? decodeSmartFile(abs, outDir, sessionBase(agent)) : decodeSmartLib(abs, outDir, sessionBase(agent))
         return ({ kind: 'success', text: `已解码完成（类型: ${kind}）:\n${result.proceed}` })
       } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+        return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
     },
   })
@@ -3277,7 +3284,7 @@ export function apply(ctx, config = {}) {
           : `源码在 ${outd}\\pous\\ 下（看程序读它），索引在 ${outd}\\00-索引.md`
         return { kind: 'success', text: `已解码完成，输出目录:\n${outd}\n\n${text}\n\n${tail}` }
       } catch (error) {
-        return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        return { kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT }
       }
     },
   })
@@ -3292,7 +3299,7 @@ export function apply(ctx, config = {}) {
         const { text } = await decodeDvpText(ctx, dvp, signal)
         return { kind: 'success', text }
       } catch (error) {
-        return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        return { kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT }
       }
     },
   })
@@ -3314,7 +3321,7 @@ export function apply(ctx, config = {}) {
         if (!check.ok) throw new Error(check.text)
         return { kind: 'success', text: `校验完成（源码目录 ${outd}）:\n\n${check.text}` }
       } catch (error) {
-        return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        return { kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT }
       }
     },
   })
@@ -3336,7 +3343,7 @@ export function apply(ctx, config = {}) {
         const need = Number(parts[1] ?? 0) || 0
         return ({ kind: 'success', text: conflictReport(o.userSyms, o.records, ptrRefs, need, 4096) })
       } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+        return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
     },
   })
@@ -3357,7 +3364,7 @@ export function apply(ctx, config = {}) {
         const result = raw[0] === 0x44 ? decodeSmartLib(abs, outDir, sessionBase(agent)) : decodeSmartFile(abs, outDir, sessionBase(agent))
         return ({ kind: 'success', text: result.proceed })
       } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+        return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
     },
   })
@@ -3373,7 +3380,7 @@ export function apply(ctx, config = {}) {
         const { notes, report } = await runDiff(ctx, oldP, newP, signal, sessionBase(agent))
         return { kind: 'success', text: notes.length ? `${notes.join('\n')}\n\n${report}` : report }
       } catch (error) {
-        return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        return { kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT }
       }
     },
   })
@@ -3393,7 +3400,7 @@ export function apply(ctx, config = {}) {
         const { proceed, report } = smartDiff(resolve(parts[0]), resolve(parts[1]), outDir, sessionBase(agent))
         return { kind: 'success', text: `${proceed}\n\n${report}` }
       } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+        return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
     },
   })
@@ -3421,7 +3428,7 @@ export function apply(ctx, config = {}) {
         }
         return ({ kind: 'success', text: `地址占用与空闲段分析（${isDir ? '已解码目录' : basename(abs)}）:\n${freeSpaceReport(userSyms, records)}` })
       } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+        return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
     },
   })

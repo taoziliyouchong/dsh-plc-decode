@@ -1,5 +1,7 @@
 # dsh-plc-decode
 
+[中文](README.md) | **English**
+
 Read PLC project files directly inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH). The plugin detects the format from the file header, decodes the project into readable reports and structured data, and provides project diffing, address audits, element-level read/write analysis and ladder-logic reconstruction.
 
 **Read-only**: project files are parsed, never modified.
@@ -65,7 +67,7 @@ The smart decoder writes a source fingerprint (size + mtime) into the report and
 
 ## Limitations
 
-- HMI projects (`.hmismart`, `.fsprj`) are out of scope.
+- HMI projects (`.hmismart`, `.fsprj`, `.nbp`, `.mcp`) are decoded by the same plugin row: screens / controls / tags / addresses, tables written to `解码归档/<project>/`. Control-to-tag references in `.hmismart` are partial (only same-segment and UUID hits); the rest is reported as "未解出".
 - Pin-level arguments of library call boxes (Slave / RW / Addr / Count / DataPtr) cannot be decoded; the tools say so instead of guessing.
 - Encrypted or specially compressed projects may fail to decode; the decoder reports an error rather than a half-true result.
 - Ladder series/parallel topology is reconstructed from instruction records (validated network-by-network against official STL exports); library call regions without standard box headers are not covered.
@@ -79,6 +81,13 @@ npm run smoke                # load the plugin and verify registrations (12 tool
 npm run smoke -- <project>   # decode one real project end-to-end
 npm pack --dry-run           # inspect package contents
 ```
+
+## Feedback
+
+- Open an issue: https://github.com/taoziliyouchong/dsh-plc-decode/issues — searchable, and others can help.
+- Or reach me on QQ: **2171960697** (mention which plugin you installed when adding the contact).
+
+Please include: DSH version, plugin version, the exact error text, and a screenshot.
 
 ## License
 
