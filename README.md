@@ -111,7 +111,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 - id: dsh-plc-decode
   name: dsh-plc-decode
   config:
-    archiveDir: D:/plc/解码归档
+    archiveDir: <归档目录>/解码归档
 ```
 
 `archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值；只想改一次就在解码时传 `outDir`。

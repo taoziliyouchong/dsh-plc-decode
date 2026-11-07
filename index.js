@@ -3238,7 +3238,7 @@ export function apply(ctx, config = {}) {
         '  - id: dsh-plc-decode',
         '    name: dsh-plc-decode',
         '    config:',
-        '      archiveDir: D:/plc/解码归档',
+        '      archiveDir: <归档目录>/解码归档',
         '',
         '只改这一次、不写配置：解码时传 outDir 参数（工具参数或 /plc-decode 的第二个参数）。',
       ].join('\n'),
