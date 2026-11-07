@@ -1,4 +1,4 @@
-# zzuser-wincc-text-i18n-workflow —— 西门子触摸屏项目文本翻译
+# wincc-text-i18n-workflow —— 西门子触摸屏项目文本翻译
 
 `Screens.xls / Others.xls / Messages.xls` 是 WinCC flexible（SMART）把工程文字按「画面 / 其它 / 报警」三处导出成的 Excel。英文列多半是半成品：有的空着，有的还是中文，更多是**串位**——这类表不能当成"填空"，得当校对。
 
@@ -16,7 +16,7 @@
 3. `apply`：回写目标列，出**同扩展名**.xls。
 4. `check`：键列没动、没有未译、没有残留 `$_ignore`、没有串位（源无中文而译文更长）、没有一源多译。
 
-工具：`zzuser-wincc-text-i18n`，`action=scan | apply | check`。
+工具：`wincc-text-i18n`，`action=scan | apply | check`。
 
 ## 三、分型只解决一半
 

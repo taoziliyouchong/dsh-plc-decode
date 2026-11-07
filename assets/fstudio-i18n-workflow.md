@@ -18,7 +18,7 @@ FStudio 里画面文字的显示有**两条路**：
 ## 正确工作流（三步，别多）
 
 ### 第 1 步 · 扫（一次扫全，别一页页看）
-插件工具 `zzuser-fstudio-i18n`（或 `zzuser-fstudio-scan-texts` 只看清单）。
+插件工具 `fstudio-i18n`（或 `fstudio-scan-texts` 只看清单）。
 
 - 扫什么：`HMI\Frame\**\*.wcfg` 里**所有**带语种文字的元件，两条路都要收：
   ① 静态文本：`StaticTextContentInfo` 的 `LanguageSN` + `LabelContent`；
@@ -89,7 +89,7 @@ FStudio 里画面文字的显示有**两条路**：
 
 
 ### 第 3 步 · 出导入表（格式由代码保证）
-`zzuser-fstudio-i18n` 直接产出 `文本库导入表.xlsx`，列名与软件导出逐字符一致：
+`fstudio-i18n` 直接产出 `文本库导入表.xlsx`，列名与软件导出逐字符一致：
 
 ```
 Guid | Name | Status | 1-Chinese (Simplified, PRC)-2052 | 2-English (United States)-1033
@@ -107,7 +107,7 @@ Guid | Name | Status | 1-Chinese (Simplified, PRC)-2052 | 2-English (United Stat
 
 ```
 python <插件>/assets/fstudio_i18n.py retag <导出的TextLib表.xls> <输出.xlsx> <词典.json> pt 2
-# 或工具/命令：zzuser-fstudio-retag <源表> <词典.json> [输出.xlsx] [语种键] [最少状态数]
+# 或工具/命令：fstudio-retag <源表> <词典.json> [输出.xlsx] [语种键] [最少状态数]
 #                                                        ↑ 写 2 = 状态不够的条目补到 2 状态
 ```
 
@@ -162,4 +162,4 @@ LONG_PT = {}
 {"en": {"启动1": "Start 1"}, "pt": {"启动1": "Partida 1"}}
 ```
 
-再用 `zzuser-fstudio-i18n` / `zzuser-fstudio-retag` 的 `dict` 参数传入。
+再用 `fstudio-i18n` / `fstudio-retag` 的 `dict` 参数传入。

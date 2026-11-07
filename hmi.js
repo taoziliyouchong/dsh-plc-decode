@@ -274,19 +274,19 @@ async function retagFstudio(ctx, src, outArg, dict, lang, minStatus, exec) {
 
 const SKILLS = [
   {
-    name: 'zzuser-hmi-decode-workflow',
+    name: 'hmi-decode-workflow',
     description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.srt 项目文本旁路读法、FStudio 多语言入口。接触摸屏（HMI）工程任务时加载。',
-    file: 'zzuser-hmi-decode-workflow.md',
+    file: 'hmi-decode-workflow.md',
   },
   {
-    name: 'zzuser-fstudio-i18n-workflow',
+    name: 'fstudio-i18n-workflow',
     description: 'FStudio/Flexem 触摸屏多语言翻译的正确工作流：三步（扫元件文本→出对照表→出可导入表）与踩坑清单（列名逐字符一致、元件文字写死不走文本库、原工程英文槽常是错填）。接多语言/翻译类触摸屏任务时加载。',
-    file: 'zzuser-fstudio-i18n-workflow.md',
+    file: 'fstudio-i18n-workflow.md',
   },
   {
-    name: 'zzuser-wincc-text-i18n-workflow',
+    name: 'wincc-text-i18n-workflow',
     description: '西门子 WinCC flexible/SMART 项目文本（Screens/Others/Messages 三件套 xls）翻译流程：格式契约（第 1 列是匹配键、换行是真换行、$_ignore 不许动）、分型判据、错译串位的识别、一源一译、术语表与出 .xls 的写法。接「触摸屏项目文本翻译/英文没填/导回英文」类任务时加载。',
-    file: 'zzuser-wincc-text-i18n-workflow.md',
+    file: 'wincc-text-i18n-workflow.md',
   },
 ]
 
