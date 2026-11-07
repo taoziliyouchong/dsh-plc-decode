@@ -15,8 +15,8 @@ import { join } from 'node:path'
 
 import { apply, inject, name as pluginName } from '../index.js'
 
-const EXPECTED_TOOLS = 18
-const EXPECTED_COMMANDS = 15
+const EXPECTED_TOOLS = 19
+const EXPECTED_COMMANDS = 20
 
 let failed = 0
 const pass = (m) => console.log(`  ok   ${m}`)

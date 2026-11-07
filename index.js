@@ -19,17 +19,60 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { writeSmartPack, writeSourcePack } from './assets/decode-pack.mjs'
 import { registerHmi } from './hmi.js'
+import { apply as applyLadder, maybeLadderHint } from './ladder.js'
 
 export const name = 'dsh-plc-decode'
 export const inject = ['skills', 'tools', 'commands', 'shell', 'sandboxPolicy']
 
 /** 报错尾行：插件出问题时，使用者第一眼看的就是错误文本。 */
+
+/* ---------- 校准表：解不出的字节/功能码 → 名字（$DSH_HOME/plc-calibration.json） ---------- */
+const CALIB_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'plc-calibration.json')
+const CALIB_CMD = 'plc-calibrate'
+function readCalib() { try { return JSON.parse(readFileSync(CALIB_FILE, 'utf8')) } catch { return {} } }
+function writeCalib(obj) { try { mkdirSync(dirname(CALIB_FILE), { recursive: true }); writeFileSync(CALIB_FILE, JSON.stringify(obj, null, 2), 'utf8') } catch { /* 写不进去不影响解码 */ } }
+function calibArgs() { try { if (!existsSync(CALIB_FILE)) writeCalib({}) } catch {} ; return existsSync(CALIB_FILE) ? ['--calib', CALIB_FILE] : [] }
+/** 从报告里捞出「没解出来」的字节/功能码（DVP 未识别记录表 + 未定名功能码 ??XX）。 */
+function collectUnknowns(text) {
+  const out = []
+  const seen = new Set()
+  for (const m of text.matchAll(/^\s*×(\d+)\s+([0-9a-f]{2}(?: [0-9a-f]{2})+)\s+首见/mg)) {
+    if (seen.has(m[2])) continue
+    seen.add(m[2]); out.push({ key: m[2], count: Number(m[1]) })
+  }
+  for (const m of text.matchAll(/\?\?([0-9A-F]{2})/g)) {
+    const k = 'cmd:' + m[1]
+    if (seen.has(k)) continue
+    seen.add(k); out.push({ key: k, count: 1 })
+  }
+  return out
+}
+/** 解码后追加「要照片 + 记校准」的提示，并把待补项写进校准表。 */
+function calibrationHint(format, reportText, source) {
+  if (!reportText) return ''
+  const un = collectUnknowns(reportText)
+  if (!un.length) return ''
+  const calib = readCalib()
+  const known = calib[format] ?? {}
+  calib.__pending = calib.__pending ?? {}
+  calib.__pending[format] = calib.__pending[format] ?? {}
+  for (const u of un) if (!known[u.key]) calib.__pending[format][u.key] = { count: u.count, source: source ?? '', at: new Date().toISOString() }
+  writeCalib(calib)
+  const list = un.slice(0, 8).map((u) => '  ×' + u.count + '  ' + u.key).join('\n')
+  return '\n\n⚠ 有 ' + un.length + ' 类没解出来（已记进校准表待补）：\n' + list
+    + '\n要补：在软件里对这几处截图（梯形图局部或指令表）发我，我按图对账。'
+    + '\n记法：/' + CALIB_CMD + ' <格式> "<字节>" "<指令名>" [备注] —— 记下后，下次同样的字节直接出名字。'
+}
+function reportHint(outd, format, src) {
+  try { const f = join(outd, '解码报告.md'); return existsSync(f) ? calibrationHint(format, readFileSync(f, 'utf8'), src) : '' } catch { return '' }
+}
+
 const FEEDBACK_HINT = '遇到问题：加 QQ 号 2171960697，或开 Issue https://github.com/taoziliyouchong/dsh-plc-decode/issues'
 
 /** 插件配置（DSH 官方 Config 机制：cordis.patch.yml 里本插件行的 config 传进 apply）。
@@ -37,6 +80,8 @@ const FEEDBACK_HINT = '遇到问题：加 QQ 号 2171960697，或开 Issue https
 export const Config = z.object({
   archiveDir: z.string().default('解码归档')
     .description('解码产物归档根目录。相对路径按当前会话工作区解析，绝对路径原样使用。默认「解码归档」。'),
+  ladder: z.boolean().default(false)
+    .description('是否启用梯形图渲染（默认关闭）。开启后可用 ladder-auto / ladder-dvp / ladder-from-stl / ladder-render；也可用 /ladder on 随时切换。'),
 })
 
 /** 生效中的归档根目录；apply 时由 config.archiveDir 覆盖，未配置即默认值（与旧版行为一致）。 */
@@ -232,7 +277,7 @@ async function decodeCodesysProject(ctx, projPath, signal, exec, outDir, base) {
   const outd = outDir || defaultArchiveDir(abs, base)
   precreateOutDir(outd, kind)
   const result = kind === 'dvp'
-    ? await runPy(ctx, 'dvp_decode.py', [abs, '-o', outd], dir, signal, exec)
+    ? await runPy(ctx, 'dvp_decode.py', [abs, '-o', outd, ...calibArgs()], dir, signal, exec)
     : await runPy(ctx, 'read_project.py', [abs, outd], dir, signal, exec)
   // 加密 .project（不是 zip，整文件高熵）：read_project.py 报 BadZipFile。
   // 强硬解码通道：同目录常有 <工程>.precompilecache（zip），里面有全部标识符与中文名，
@@ -263,7 +308,7 @@ async function decodeCodesysProject(ctx, projPath, signal, exec, outDir, base) {
 async function decodeDvpText(ctx, dvpPath, signal, exec) {
   const abs = requireDvp(dvpPath, '需要一个 .dvp 工程文件路径（带空格请加引号）')
   const dir = dirname(abs)
-  const result = await runPy(ctx, 'dvp_decode.py', [abs], dir, signal, exec)
+  const result = await runPy(ctx, 'dvp_decode.py', [abs, ...calibArgs()], dir, signal, exec)
   if (!result.ok) throw new Error(result.text)
   return { abs, dir, text: result.text }
 }
@@ -2616,6 +2661,9 @@ export function apply(ctx, config = {}) {
   // 触摸屏（HMI）工程解码：画面/控件/变量/地址，与 PLC 侧共用同一插件行（hmi.js）。
   registerHmi(ctx)
 
+  // 梯形图渲染/自动成图（ladder.js）：默认关闭，/ladder on 打开。
+  applyLadder(ctx, cfg)
+
   // ── 工具一：统一入口（四格式自动识别分发）──
   ctx.tools.register({
     name: 'plc-decode',
@@ -2651,7 +2699,7 @@ export function apply(ctx, config = {}) {
       if (kind === 'project' || kind === 'dvp') {
         const result = await decodeCodesysProject(ctx, abs, exec.signal, exec, outDir, sessionBase(exec?.agent))
         const tail = String(result.kind).includes('加密') ? '00-目录.md' : '00-索引.md'
-        return { ok: true, text: `已解码完成（类型: ${result.kind}）\n输出目录: ${result.outd}\n${result.text}\n下一步: 先读 ${join(result.outd, tail)}` }
+        return { ok: true, text: `已解码完成（类型: ${result.kind}）\n输出目录: ${result.outd}\n${result.text}\n下一步: 先读 ${join(result.outd, tail)}` + maybeLadderHint() + reportHint(result.outd, result.kind === 'dvp' ? 'dvp' : 'codesys', abs) }
       }
       if (kind === 'hmismart') {
         throw new Error(
@@ -2662,7 +2710,7 @@ export function apply(ctx, config = {}) {
         )
       }
       const result = kind === 'smart' ? decodeSmartFile(abs, outDir, sessionBase(exec?.agent)) : decodeSmartLib(abs, outDir, sessionBase(exec?.agent))
-      return { ok: true, text: `已解码完成（类型: ${kind}）:\n${result.proceed}` }
+      return { ok: true, text: `已解码完成（类型: ${kind}）:\n${result.proceed}` + maybeLadderHint() + reportHint(result.outdir ?? outDir ?? join(sessionBase(exec?.agent), '解码归档'), 'smart', abs) }
     },
   })
 
@@ -3426,6 +3474,23 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         return ({ kind: 'error', text: (error instanceof Error ? error.message : String(error)) + '\n\n' + FEEDBACK_HINT })
       }
+    },
+  })
+
+  ctx.commands.register({
+    name: 'plc-calibrate',
+    description: '记录解不出的字节/功能码对应的名字（校准表）：解完后下次同样的字节直接出名字。参数：格式（dvp/smart/codesys）、字节或 cmd:XX、名字，可选备注。',
+    input: { hint: '<格式> <字节或 cmd:XX> <名字> [备注]' },
+    handler: async ({ rawInput }) => {
+      const parts = splitArgs(rawInput)
+      if (parts.length < 3) return { kind: 'error', text: '用法：/plc-calibrate <格式> <字节或 cmd:XX> <名字> [备注]' }
+      const [format, key, name, ...note] = parts
+      const calib = readCalib()
+      calib[format] = calib[format] ?? {}
+      calib[format][key] = { name, note: note.join(' '), at: new Date().toISOString() }
+      if (calib.__pending && calib.__pending[format]) delete calib.__pending[format][key]
+      writeCalib(calib)
+      return { kind: 'success', text: '已记入校准表：' + format + ' ' + key + ' → ' + name + '（下次解码生效）' }
     },
   })
 }

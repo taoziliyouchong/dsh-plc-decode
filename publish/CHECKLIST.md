@@ -5,12 +5,12 @@
 ## 0. 发布前在本机验证
 
 ```sh
-npm run check                  # 五个 JS 文件语法检查
-npm run smoke                  # 装载插件 + 核对注册面（工具 12 / 命令 12）
-npm run smoke -- "D:\path\to\machine.smart"   # 拿一份真实工程跑端到端解码
+npm run check                  # 全部 JS / MJS 语法检查
+npm run smoke                  # 装载插件 + 核对注册面（工具 19 / 命令 20）
+npm run smoke -- <工程文件路径>  # 拿一份真实工程跑端到端解码
 ```
 
-端到端这步必做，且最好四种格式各挑一份：`.project` / `.dvp` 走 Python，`.smart` / `.smartlib` 走内嵌解码器，两类路径都覆盖到再发。
+端到端这步必做，且最好四种格式各挑一份：`.project` / `.dvp` 走 Python，`.smart` / `.smartlib` 走内嵌解码器，两类路径都覆盖到再发；触摸屏三种入口（`.hmismart` / `.fsprj` / `.emtp`）各跑一次。
 
 ## 0.5 检查打包内容
 
@@ -18,7 +18,7 @@ npm run smoke -- "D:\path\to\machine.smart"   # 拿一份真实工程跑端到�
 npm pack --dry-run
 ```
 
-包里应只有：`index.js`、`invariant.js`、`cordis.patch.yml`、`assets/`、`scripts/`、两个 README、`LICENSE`、`package.json`。`publish/`、`.gitignore`、`解码归档/` 都不该进包。
+包里应只有：`index.js`、`hmi.js`、`ladder.js`、`cordis.patch.yml`、`assets/`、`scripts/`、两个 README、`LICENSE`、`package.json`。`publish/`、`.gitignore`、`解码归档/` 都不该进包。
 
 ## 1. 建 GitHub 仓库
 
@@ -52,7 +52,7 @@ npm publish --access public
 ## 5. 之后的版本更新
 
 1. 改 `package.json` 的 `version`（语义化版本）。
-2. 打 tag：`git tag v0.1.1 && git push --tags`。
+2. 打 tag：`git tag v<版本> && git push --tags`。
 3. `npm publish`（如果走 npm）。
 4. 目录条目不用改，市场按 npm 版本或 GitHub HEAD 检查更新。
 
@@ -61,7 +61,7 @@ npm publish --access public
 | 要求 | 本仓库状态 |
 |---|---|
 | `package.json` 声明 `dsh.bundle.patch` | 已声明，指向 `cordis.patch.yml` |
-| 仓库有真实可用代码 | 有（四格式解码；12 个工具 = 1 个统一入口 + 11 个分析工具；12 个命令） |
+| 仓库有真实可用代码 | 有（四格式 PLC 解码 + 五类触摸屏解码 + 梯形图渲染；19 个工具 = 1 个 PLC 统一入口 + 11 个分析工具 + 3 个触摸屏工具 + 4 个梯形图工具；20 个命令） |
 | 仓库满 1 天 | 建库后次日再提 PR |
 | 加 `dsh-plugin` topic | 建库时加 |
 | 描述只说功能、不夸大 | `registry-entry.yml` 已按实际能力写 |

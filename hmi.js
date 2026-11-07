@@ -1,11 +1,13 @@
 /**
  * hmi-decode —— 触摸屏（HMI）工程入口
  *
- * 覆盖两类屏，跟 PLC 侧分开（PLC 工程走 plc-decode）：
+ * 覆盖三类屏，跟 PLC 侧分开（PLC 工程走 plc-decode）：
  *   ① 西门子 Smart Line（WinCC flexible SMART）工程 `.hmismart`
  *      —— 解码出画面/变量/连接清单；新旧两份出差异报告（起始画面/画面表/画面名/配套文件）。
  *   ② 繁易 FStudio / Flexem 工程 `.fsprj`
  *      —— 扫元件文本（按语种分槽）＋出可导入文本库的多语言表。
+ *   ③ 威纶通 EasyBuilder Pro 工程 `.emtp` / 编译产物 `.exob`
+ *      —— .emtp 加密读不动，改读同目录编译产物 .exob：出画面、文字对象、报警事件与文字库条目。
  *
  * 只读源工程；产物按各自约定落 「<工作区>\解码归档\<工程名>\HMI解码\」或「<工程目录>\多语言产出\」。
  */
@@ -21,8 +23,8 @@ const TIMEOUT_MS = 300_000
 /** 本插件自带资源目录（hmismart 解码器 / hmismart 差异 / FStudio 脚本） */
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'assets')
 const SCRIPT_FSTUDIO = join(ASSETS_DIR, 'fstudio_i18n.py')
-const SCRIPT_WINCC = join(ASSETS_DIR, 'wincc_i18n.py')
 const SCRIPT_FSTUDIO_TABLES = join(ASSETS_DIR, 'fstudio-tables.py')
+const SCRIPT_EBPRO_DECODE = join(ASSETS_DIR, 'ebpro-decode.mjs')
 
 // ───────────────────────── 通用工具 ─────────────────────────
 
@@ -105,7 +107,7 @@ async function runNode(ctx, script, argv, workdir, signal, exec) {
 
 /** 跑 FStudio 的 Python 脚本（WinError 5 读锁重试一次）。 */
 async function runPy(ctx, argv, workdir, signal, exec) {
-  const command = `& ${PY} ${psq(SCRIPT_FSTUDIO)} ${argv.map(psq).join(' ')}`
+  const command = `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(SCRIPT_FSTUDIO)} ${argv.map(psq).join(' ')}`
   let r = await runShell(ctx, command, workdir, signal, exec)
   if (r.exitCode !== 0 && /PermissionError|WinError 5|OSError/.test(`${r.err} ${r.out}`)) {
     r = await runShell(ctx, command, workdir, signal, exec)
@@ -115,17 +117,6 @@ async function runPy(ctx, argv, workdir, signal, exec) {
 }
 
 /** 跑本插件 assets 里的任意 Python 脚本（WinError 5 读锁重试一次）。 */
-async function runPyScript(ctx, script, argv, workdir, signal, exec) {
-  if (!existsSync(script)) throw new Error(`插件资源缺失: ${script}`)
-  const command = `& ${PY} ${psq(script)} ${argv.map(psq).join(' ')}`
-  let r = await runShell(ctx, command, workdir, signal, exec)
-  if (r.exitCode !== 0 && /PermissionError|WinError 5|OSError/.test(`${r.err} ${r.out}`)) {
-    r = await runShell(ctx, command, workdir, signal, exec)
-  }
-  if (r.exitCode !== 0) throw new Error(`python 退出码 ${r.exitCode}\n${r.err || r.out || '(无输出)'}`)
-  return r.out
-}
-
 // ───────────────────────── 识别 ─────────────────────────
 
 /**
@@ -143,6 +134,8 @@ function identify(file) {
   //   .mcp/.mcgs  = MCGS / LSTP Studio（Microsoft Access 数据库，表里就是画面/变量/报警）
   if (low.endsWith('.nbp')) return { kind: 'nb', abs }
   if (low.endsWith('.mcp') || low.endsWith('.mcgs') || low.endsWith('.mcp.mcgs')) return { kind: 'mcgs', abs }
+  // 威纶通 EasyBuilder Pro：.emtp 工程本体加密读不动，解码取同工程编译产物 .exob
+  if (low.endsWith('.emtp') || low.endsWith('.exob')) return { kind: 'ebpro', abs }
   if (existsSync(join(abs, 'HMI', 'Frame'))) return { kind: 'fstudio', project: abs }
   const head = readFileSync(abs).subarray(0, 4)
   if (head.length === 4 && head[0] === 0x01 && head[1] === 0x0F && head[2] === 0x00 && head[3] === 0x00) {
@@ -150,7 +143,7 @@ function identify(file) {
   }
   throw new Error(
     `不是可识别的触摸屏工程（前 4 字节: ${[...head].map(b => b.toString(16).padStart(2, '0')).join(' ')}）: ${file}\n`
-    + '支持两类: .hmismart（西门子 WinCC flexible SMART 触摸屏工程）/ .fsprj 或含 HMI\\Frame 的 FStudio 工程目录。\n'
+    + '支持: .hmismart（西门子 WinCC flexible SMART）/ .fsprj 或含 HMI\\Frame 的 FStudio 工程目录 / .nbp（欧姆龙 NB）/ .mcp·.mcgs（MCGS）/ .emtp·.exob（威纶通 EasyBuilder Pro）。\n'
     + '提示: PLC 工程（.project / .dvp / .smart / .smartlib）请用 plc-decode。'
   )
 }
@@ -216,7 +209,7 @@ async function diffHmismart(ctx, oldAbs, newAbs, outDirArg, agent, signal) {
 /** 跑任意本插件自带的 Python 脚本（argv 走 shell 引号）。 */
 async function runPyFile(ctx, script, argv, workdir, signal, exec) {
   if (!existsSync(script)) throw new Error(`插件资源缺失: ${script}`)
-  const { out, err, exitCode } = await runShell(ctx, `& ${PY} ${psq(script)} ${argv.map(psq).join(' ')}`, workdir, signal, exec)
+  const { out, err, exitCode } = await runShell(ctx, `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(script)} ${argv.map(psq).join(' ')}`, workdir, signal, exec)
   if (exitCode !== 0) throw new Error(`脚本退出码 ${exitCode}\n${err || out || '(无输出)'}`)
   return out
 }
@@ -239,35 +232,20 @@ async function scanFstudio(ctx, fileOrDir, outDirArg, exec) {
   return `扫描完成：\n${out}\n明细 JSON: ${jsonPath}`
 }
 
-async function makeFstudio(ctx, fileOrDir, outDirArg, dict, exec) {
-  const proj = requireFstudio(fileOrDir)
-  const outDir = outDirArg ? resolve(outDirArg) : join(proj, '多语言产出')
-  mkdirSync(outDir, { recursive: true })
-  const argv = ['make', proj, outDir]
-  if (dict) argv.push(resolve(dict))
-  const out = await runPy(ctx, argv, sessionBase(exec?.agent), exec?.signal, exec)
-  return `FStudio 多语言产出：\n${out}\n`
-    + `对照表: ${join(outDir, '元件多语言对照表.xlsx')}\n`
-    + `导入表: ${join(outDir, '文本库导入表.xlsx')}（FStudio 文本库 → 导入）\n`
-    + '下一步：把导入表导进文本库，再逐元件勾「使用文本库」指到条目。'
-}
+// ───────────────────────── 威纶通 EasyBuilder Pro .emtp / .exob ─────────────────────────
 
 /**
- * 已导出的文本库表换语种列：第三语种（如韩语）整列换掉，其余列原样。
- * 词典给第三语种译文（json 的 "pt"/"ko"，或 py 的 ELEMENT_PT/ELEMENT_KO）。
+ * EBpro 工程解码：读同工程编译产物 .exob（.emtp 本体加密读不动），出画面/文字对象/报警事件/文字库。
+ * 默认产物落「<工作区>\解码归档\<工程名>\HMI解码\」。只读源文件。
  */
-async function retagFstudio(ctx, src, outArg, dict, lang, minStatus, exec) {
-  const abs = resolve(src)
-  if (!existsSync(abs)) throw new Error(`源表不存在: ${src}`)
-  if (!dict) throw new Error('参数 dict 必填：给第三语种词典（.json 的 {"pt": {…}} 或 .py 的 ELEMENT_PT = {…}）')
-  const dpath = resolve(dict)
-  if (!existsSync(dpath)) throw new Error(`词典不存在: ${dpath}`)
-  const out = outArg ? resolve(outArg) : join(dirname(abs), `文本库导入表_${lang || 'third'}.xlsx`)
-  const argv = ['retag', abs, out, dpath]
-  if (lang) argv.push(lang)
-  if (Number.isFinite(minStatus) && minStatus >= 2) argv.push(String(Math.trunc(minStatus)))
-  const log = await runPy(ctx, argv, sessionBase(exec?.agent), exec?.signal, exec)
-  return `${log}\n导入: FStudio → 文本库 → 导入 → 选这份表（列名已按目标语种 LCID 写好）。`
+async function decodeEbpro(ctx, file, outDirArg, exobArg, exec) {
+  const abs = resolve(file)
+  const target = outDirArg ? resolve(outDirArg) : join(defaultArchiveDir(abs, sessionBase(exec?.agent)), 'HMI解码')
+  mkdirSync(target, { recursive: true })
+  const argv = [abs, target]
+  if (exobArg) argv.push('--exob', resolve(exobArg))
+  const out = await runNode(ctx, SCRIPT_EBPRO_DECODE, argv, dirname(target), exec?.signal, exec)
+  return `${out}\n产物目录: ${target}\n先读 HMI解码报告.md；原始表在 10-画面.tsv / 11-文字对象.tsv / 12-报警事件.tsv / 13-文字库.tsv。`
 }
 
 // ───────────────────────── 注册面 ─────────────────────────
@@ -277,16 +255,6 @@ const SKILLS = [
     name: 'hmi-decode-workflow',
     description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.srt 项目文本旁路读法、FStudio 多语言入口。接触摸屏（HMI）工程任务时加载。',
     file: 'hmi-decode-workflow.md',
-  },
-  {
-    name: 'fstudio-i18n-workflow',
-    description: 'FStudio/Flexem 触摸屏多语言翻译的正确工作流：三步（扫元件文本→出对照表→出可导入表）与踩坑清单（列名逐字符一致、元件文字写死不走文本库、原工程英文槽常是错填）。接多语言/翻译类触摸屏任务时加载。',
-    file: 'fstudio-i18n-workflow.md',
-  },
-  {
-    name: 'wincc-text-i18n-workflow',
-    description: '西门子 WinCC flexible/SMART 项目文本（Screens/Others/Messages 三件套 xls）翻译流程：格式契约（第 1 列是匹配键、换行是真换行、$_ignore 不许动）、分型判据、错译串位的识别、一源一译、术语表与出 .xls 的写法。接「触摸屏项目文本翻译/英文没填/导回英文」类任务时加载。',
-    file: 'wincc-text-i18n-workflow.md',
   },
 ]
 
@@ -304,11 +272,11 @@ export function registerHmi(ctx) {
   // ── 工具一：触摸屏工程统一入口（.hmismart 解码 / FStudio 文本扫描）──
   ctx.tools.register({
     name: 'hmi-decode',
-    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 扫元件文本；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
+    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 扫元件文本；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略；.emtp / .exob（威纶通 EasyBuilder Pro）→ 画面/文字对象/报警事件/文字库（读编译产物）。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
     parameters: {
       type: 'object',
       properties: {
-        file: { type: 'string', description: '触摸屏工程：.hmismart 路径，或 .fsprj / FStudio 工程目录（含 HMI\\Frame 的那一层）。' },
+        file: { type: 'string', description: '触摸屏工程：.hmismart，或 .fsprj / FStudio 工程目录（含 HMI\\Frame 的那一层），或 .nbp / .mcp / .mcgs / .emtp / .exob。' },
         outDir: { type: 'string', description: '可选：输出目录；缺省 .hmismart 写工作区「解码归档\\<工程文件名>\\HMI解码\\」，FStudio 写 <工程目录>\\多语言产出\\。' },
       },
       required: ['file'],
@@ -335,11 +303,15 @@ export function registerHmi(ctx) {
           text: `已解码完成（类型: ${kind === 'mcgs' ? 'mcgs / MCGS·LSTP 组态工程（Access 库）' : 'nb / NB-Designer 工程（XML）'}）:\n${out}\n产物目录: ${target}`,
         }
       }
+      if (kind === 'ebpro') {
+        const text = await decodeEbpro(ctx, abs, outDir, undefined, exec)
+        return { ok: true, text: `已解码完成（类型: ebpro / 威纶通 EasyBuilder Pro）:\n${text}` }
+      }
       const tables = await decodeFstudio(ctx, project, outDir, exec)
       const scan = await scanFstudio(ctx, project, undefined, exec)
       return {
         ok: true,
-        text: `FStudio 工程（类型: fstudio / Flexem FStudio）:\n${tables.text}\n产物目录: ${tables.target}\n${scan}\n下一步: 要出对照表与可导入文本库的表，用工具 fstudio-i18n。`,
+        text: `FStudio 工程（类型: fstudio / Flexem FStudio）:\n${tables.text}\n产物目录: ${tables.target}\n${scan}\n下一步: 要看各语种元件文本明细，用 hmi-decode 对同一工程的扫描输出。`,
       }
     },
   })
@@ -372,15 +344,16 @@ export function registerHmi(ctx) {
     },
   })
 
-  // ── 工具三：FStudio 只扫元件文本，先看清要翻什么 ──
+  // ── 工具七：威纶通 EasyBuilder Pro 工程解码（读编译产物 .exob）──
   ctx.tools.register({
-    name: 'fstudio-scan-texts',
-    description: '扫描 FStudio/Flexem 工程里全部静态文本元件的文字（按语种分槽）：每个元件的各语种槽内容、以及文本库现状，出明细 JSON。用于「先看清有哪些文字要翻、哪些没进库」。只读。',
+    name: 'ebpro-decode',
+    description: '威纶通 EasyBuilder Pro（EBpro）工程解码：.emtp 工程本体压缩+加密读不动，改读同工程编译产物 .exob，解出画面清单（按大号标签对象推定）、每个文字对象（所属画面/类型码/语言槽/文字/文字度量/偏移）、报警事件文本、文字库条目；产物为「HMI解码报告.md + 00-格式说明.md + 10-画面.tsv / 11-文字对象.tsv / 12-报警事件.tsv / 13-文字库.tsv + 08-统计.json」。用户给 .emtp / .exob 要求「解码 / 读画面 / 看有哪些画面和文字」时调用。只读源文件。',
     parameters: {
       type: 'object',
       properties: {
-        file: { type: 'string', description: 'FStudio 工程：.fsprj 路径或工程目录。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省写 <工程目录>\\多语言产出\\。' },
+        file: { type: 'string', description: 'EBpro 工程 .emtp 路径 / 编译产物 .exob 路径 / 工程目录（给 .emtp 或目录时自动找同名 .exob）。' },
+        outDir: { type: 'string', description: '可选：输出目录；缺省写工作区「解码归档\\<工程文件名>\\HMI解码\\」。' },
+        exob: { type: 'string', description: '可选：显式指定编译产物 .exob（与 file 不同名时用）。' },
       },
       required: ['file'],
       additionalProperties: false,
@@ -390,109 +363,9 @@ export function registerHmi(ctx) {
       const file = typeof args.file === 'string' ? args.file.trim() : ''
       if (!file) throw new Error('参数 file 不能为空')
       if (!existsSync(resolve(file))) throw new Error(`路径不存在: ${file}`)
-      const outDir = typeof args.outDir === 'string' && args.outDir.trim() ? resolve(args.outDir.trim()) : undefined
-      return { ok: true, text: await scanFstudio(ctx, file, outDir, exec) }
-    },
-  })
-
-  // ── 工具四：FStudio 多语言一步到位，出对照表 + 可导入表 ──
-  ctx.tools.register({
-    name: 'fstudio-i18n',
-    description: 'FStudio/Flexem 触摸屏多语言：扫工程里全部静态文本元件（按语种分槽的中/英/韩等文字），出多语言对照表与可直接导入 FStudio 文本库的表（列名与软件导出的 TextLib 表一致）。用户说「触摸屏多语言/翻译」「文本库没翻译」「画面文字切语种不变」「元件文本入库」时调用。只读工程，产物写输出目录。',
-    parameters: {
-      type: 'object',
-      properties: {
-        file: { type: 'string', description: 'FStudio 工程：.fsprj 路径，或工程目录（含 HMI\\Frame 的那一层）。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省写 <工程目录>\\多语言产出\\。' },
-        dict: { type: 'string', description: '可选：词典文件（.py 含 ELEMENT_EN/LONG_EN、ELEMENT_PT/LONG_PT 或 ELEMENT_KO/LONG_KO，或 .json 平表 / {"en":{…},"pt":{…}}），给中文配译文。' },
-      },
-      required: ['file'],
-      additionalProperties: false,
-    },
-    output: TEXT_OUTPUT,
-    async execute(args, exec) {
-      const file = typeof args.file === 'string' ? args.file.trim() : ''
-      if (!file) throw new Error('参数 file 不能为空')
-      if (!existsSync(resolve(file))) throw new Error(`路径不存在: ${file}`)
-      const outDir = typeof args.outDir === 'string' && args.outDir.trim() ? resolve(args.outDir.trim()) : undefined
-      const dict = typeof args.dict === 'string' && args.dict.trim() ? args.dict.trim() : ''
-      return { ok: true, text: await makeFstudio(ctx, file, outDir, dict, exec) }
-    },
-  })
-
-  // ── 工具五：已导出的文本库表换语种列（第三语种整列换掉）──
-  ctx.tools.register({
-    name: 'fstudio-retag',
-    description: '把 FStudio 已导出的文本库表（TextLib 表：Guid/Name/Status/各语种列）整列换语种：第三语种列（如韩语）换成词典给的目标语种（巴葡 pt / 葡葡 pt-pt / 俄 ru / 西 es …），中英文列、行序、Guid、Status 原样保留，出可直接导回文本库的表。用户说「这个导出的文本库表把韩语去掉换成葡萄牙语」「文本库表换语种/加语种」时调用。只读源表。',
-    parameters: {
-      type: 'object',
-      properties: {
-        src: { type: 'string', description: 'FStudio 导出的文本库表：.xls 或 .xlsx（含 Guid/Name/Status 列）。' },
-        dict: { type: 'string', description: '词典：.json（{"pt": {"中文":"译文"}} 或平表 {"中文":"译文"}）或 .py（ELEMENT_PT = {…}）。' },
-        out: { type: 'string', description: '可选：输出 xlsx 路径；缺省写源表同目录「文本库导入表_<语种>.xlsx」。' },
-        lang: { type: 'string', description: '可选：语种键 pt(巴西葡语)/pt-pt(葡萄牙葡语)/ko/ru/es/vi/th/ar；缺省按词典里有的语种自动取。' },
-        minStatus: { type: 'number', description: '可选：把状态数不足的条目补到这个状态数（如 2）。新增状态行 Guid 留空、Status 递增、文字与首行相同——屏上开关/指示灯是双状态元件，库里条目只有一个状态时状态 1 会显示空白。' },
-      },
-      required: ['src', 'dict'],
-      additionalProperties: false,
-    },
-    output: TEXT_OUTPUT,
-    async execute(args, exec) {
-      const src = typeof args.src === 'string' ? args.src.trim() : ''
-      if (!src) throw new Error('参数 src 不能为空')
-      const dict = typeof args.dict === 'string' ? args.dict.trim() : ''
-      const out = typeof args.out === 'string' && args.out.trim() ? args.out.trim() : ''
-      const lang = typeof args.lang === 'string' && args.lang.trim() ? args.lang.trim() : ''
-      const minStatus = typeof args.minStatus === 'number' ? args.minStatus : 0
-      return { ok: true, text: await retagFstudio(ctx, src, out, dict, lang, minStatus, exec) }
-    },
-  })
-
-  // ── 工具六：WinCC flexible 项目文本导出表多语言（Screens/Others/Messages 三件套）──
-  ctx.tools.register({
-    name: 'wincc-text-i18n',
-    description: 'WinCC flexible/SMART 项目文本导出表（Screens.xls / Others.xls / Messages.xls 三件套）多语言处理：scan 分型出待译清单（未译/空译/$_ignore/非中文同形，并标出一源多译）、apply 按「中文原文→译文」映射回写目标语言列并出同扩展名 .xls、check 自检（键列未动、无未译、无残留 $_ignore、无串位、无一源多译）。用户说「触摸屏翻译/项目文本翻译/英文没填/导回英文」时调用。产物写回源表同路径同名覆盖（改前备份原件）。',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['scan', 'apply', 'check'], description: 'scan＝分型出清单；apply＝按映射回写；check＝自检产物。' },
-        files: { type: 'array', items: { type: 'string' }, description: 'scan/apply 用：项目文本导出表路径（.xls 或 .xlsx），可多个。' },
-        dict: { type: 'string', description: 'apply 用：映射文件（.tsv 两列「源文本<TAB>译文」，或 .json 平表）；换行在映射里写 \\n。' },
-        outdir: { type: 'string', description: '可选：输出目录；缺省写会话工作区「翻译_项目文本\\」。' },
-        src: { type: 'string', description: 'check 用：原始导出表路径。' },
-        out: { type: 'string', description: 'check 用：回写后的产物路径。' },
-      },
-      required: ['action'],
-      additionalProperties: false,
-    },
-    output: TEXT_OUTPUT,
-    async execute(args, exec) {
-      const action = String(args.action || 'scan').trim()
-      const files = Array.isArray(args.files) ? args.files.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim()) : []
-      const base = sessionBase(exec?.agent)
-      const outdir = typeof args.outdir === 'string' && args.outdir.trim()
-        ? resolve(args.outdir.trim())
-        : join(base, '翻译_项目文本')
-      if (action === 'scan' || action === 'apply') {
-        if (files.length === 0) throw new Error('scan/apply 需要 files（项目文本导出表路径）')
-        for (const f of files) if (!existsSync(resolve(f))) throw new Error(`文件不存在: ${f}`)
-        if (action === 'scan') {
-          return { ok: true, text: await runPyScript(ctx, SCRIPT_WINCC, ['scan', '--files', ...files.map(f => resolve(f)), '--outdir', outdir], base, exec?.signal, exec) }
-        }
-        const dict = typeof args.dict === 'string' && args.dict.trim() ? resolve(args.dict.trim()) : ''
-        if (!dict) throw new Error('apply 需要 dict（映射文件 .tsv/.json）')
-        if (!existsSync(dict)) throw new Error(`映射文件不存在: ${dict}`)
-        return { ok: true, text: await runPyScript(ctx, SCRIPT_WINCC, ['apply', '--files', ...files.map(f => resolve(f)), '--dict', dict, '--outdir', outdir], base, exec?.signal, exec) }
-      }
-      if (action === 'check') {
-        const src = typeof args.src === 'string' && args.src.trim() ? resolve(args.src.trim()) : ''
-        const out = typeof args.out === 'string' && args.out.trim() ? resolve(args.out.trim()) : ''
-        if (!src || !out) throw new Error('check 需要 src 与 out')
-        if (!existsSync(src)) throw new Error(`文件不存在: ${src}`)
-        if (!existsSync(out)) throw new Error(`文件不存在: ${out}`)
-        return { ok: true, text: await runPyScript(ctx, SCRIPT_WINCC, ['check', '--src', src, '--out', out, '--outdir', outdir], base, exec?.signal, exec) }
-      }
-      throw new Error(`未知 action: ${action}（可用 scan / apply / check）`)
+      const outDir = typeof args.outDir === 'string' && args.outDir.trim() ? args.outDir.trim() : ''
+      const exob = typeof args.exob === 'string' && args.exob.trim() ? args.exob.trim() : ''
+      return { ok: true, text: await decodeEbpro(ctx, file, outDir, exob, exec) }
     },
   })
 
@@ -533,26 +406,6 @@ export function registerHmi(ctx) {
         }
         const outDirArg = parts[2] ? resolve(parts[2]) : undefined
         const text = await diffHmismart(ctx, resolve(parts[0]), resolve(parts[1]), outDirArg, agent, undefined)
-        return { kind: 'success', text }
-      } catch (error) {
-        return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
-      }
-    },
-  })
-
-  // ── 技能（两篇资产）──
-  ctx.commands.register({
-    name: 'fstudio-retag',
-    description: '把 FStudio 导出的文本库表整列换语种（如去掉韩语换成葡萄牙语），可顺带补足状态行',
-    input: { hint: '<导出的TextLib表> <词典.json> [输出.xlsx] [语种键 pt/pt-pt/ko/ru] [最少状态数 如2]' },
-    handler: async ({ rawInput, agent }) => {
-      try {
-        const parts = splitArgs(rawInput)
-        if (parts.length < 2) {
-          return ({ kind: 'error', text: '用法: /fstudio-retag <导出的TextLib表.xls> <词典.json> [输出.xlsx] [语种键] [最少状态数]（带空格路径请加引号）' })
-        }
-        const minStatus = parts[4] && /^\d+$/.test(parts[4]) ? Number(parts[4]) : 0
-        const text = await retagFstudio(ctx, parts[0], parts[2], parts[1], parts[3], minStatus, { agent })
         return { kind: 'success', text }
       } catch (error) {
         return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })

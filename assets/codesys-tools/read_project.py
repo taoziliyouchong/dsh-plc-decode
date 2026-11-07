@@ -3,7 +3,7 @@
 read_project.py — 读取 CoDeSys V3.5 / LeadSysStudio 工程文件 (.project) 的内容。
 
 用法:
-    python read_project.py "C:\\projects\\demo.project" [-o 输出目录]
+    python read_project.py <工程文件.project> [-o 输出目录]
 
 功能:
   1. 解包 .project (ZIP)

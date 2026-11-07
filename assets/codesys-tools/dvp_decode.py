@@ -3,7 +3,7 @@
 dvp_decode.py — 台达 WPLSoft/ISPSoft DVP 工程文件解码器
 
 用法:
-    python dvp_decode.py "C:\\projects\\demo.dvp" [-o 输出目录]
+    python dvp_decode.py <工程文件.dvp> [-o 输出目录]
 
 功能:
   1. 文件结构（机型 / TypeBegin 块 / SMT 块分段）
@@ -33,6 +33,7 @@ dvp_decode.py — 台达 WPLSoft/ISPSoft DVP 工程文件解码器
 import sys
 import os
 import re
+import json
 
 def read_bytes(path):
     with open(path, "rb") as f:
@@ -113,6 +114,7 @@ ROWIDX_PREFIX = {0x14, 0x16}
 # （段号, 行号, 字节原文），main 末尾聚合成「未识别记录」一节。
 # 这不是猜语义，是把「读不出来」变成看得见的账——用户能据此对照 WPLSoft 指令表。
 UNKNOWN_RECS = []
+CALIB = {}
 
 # 触点/线圈指令前缀：
 #   12 触点族（LD/AND/T 页）、32=OUT、22=AND/ANI
@@ -328,7 +330,7 @@ def _to_loading(cp):
     return cp
 
 
-def disasm(seg, segno=0):
+def disasm(seg, segno=0, collect=None, calib=None):
     """段数据区 → 行分组指令 token 流
     - 比较指令族 ?CMP（e2/e4/e6/e9 + 双操作数，指令名待对照，统一 ? 前缀）
     - 行尾/分隔记录整体吞 5B（0b/61 10/68 10/57 10/5a/34/39）
@@ -403,7 +405,7 @@ def disasm(seg, segno=0):
                     # 段首非程序记录（不在任何网络里、无操作数），不是指令，整体吞 5B
                     i += 5
                     continue
-                toks.append(CMD_MAP.get(rec[2]) or guess_cmd(rec[2]) or f"??{rec[2]:02X}")
+                toks.append(_cal_name(calib, f"cmd:{rec[2]:02X}") or CMD_MAP.get(rec[2]) or guess_cmd(rec[2]) or f"??{rec[2]:02X}")
                 i += 5
             else:
                 op = decode_operand(rec)
@@ -446,7 +448,40 @@ def disasm(seg, segno=0):
                                 toks.append(f"〔?{rec[0]:02x}{rec[1]:02x}{rec[2]:02x}〕")
                             i += step
         rows.append(" ".join(toks))
+        if collect is not None:
+            collect.append((segno, li, list(toks)))
     return rows
+
+
+# ---- 指令流结构化（--json 输出给梯形图用；与报告同一份 token） ----
+_OPERAND_RE = re.compile(r'^(?:K-?\d+|H[0-9A-F]+|[DXMYTCSV]\d+(?:\.\d+)?|F-?[\d.]+)$')
+
+def _cal_name(calib, key):
+    v = (calib or {}).get(key)
+    if isinstance(v, dict):
+        v = v.get("name")
+    return v
+
+
+def to_insts(toks):
+    """token 串 → [{op,args}]：操作数挂到前一条指令上；| 分隔符丢弃。"""
+    insts = []
+    for t in toks:
+        if t == '|' or (t.startswith('|H') and t.endswith('|')):
+            continue
+        if t in ('MPS', 'MRD', 'MPP', 'ORB', 'ANB') or t.startswith('〔?') or t.startswith('?CMP') or t.startswith('??'):
+            insts.append({'op': t, 'args': []})
+            continue
+        if ' ' in t:
+            op, _, arg = t.partition(' ')
+            insts.append({'op': op, 'args': [arg]})
+            continue
+        if _OPERAND_RE.match(t):
+            if insts:
+                insts[-1]['args'].append(t)
+            continue
+        insts.append({'op': t, 'args': []})
+    return insts
 
 def main():
     argv = sys.argv[1:]
@@ -455,13 +490,22 @@ def main():
         return
     path = argv[0]
     out_dir = None
+    json_path = argv[argv.index("--json") + 1] if "--json" in argv else None
+    calib_path = argv[argv.index("--calib") + 1] if "--calib" in argv else None
     if "-o" in argv:
         out_dir = argv[argv.index("-o") + 1]
 
     data = read_bytes(path)
     text = data.decode("ascii", "replace")
     UNKNOWN_RECS.clear()
+    if calib_path and os.path.exists(calib_path):
+        try:
+            with open(calib_path, encoding="utf-8") as f:
+                CALIB.update((json.load(f).get("dvp") or {}))
+        except Exception:
+            pass
     lines = []
+    insts_out = []
 
     # ---- 1. 结构 ----
     lines.append("=" * 60)
@@ -539,7 +583,7 @@ def main():
                 spans.append((0, de0 + len("<DataEnd>"), nxt))
                 lines.append("  (本工程无 <SMT> 分段标记，按 Initial Value 块后的整块数据反汇编)")
     for si, ds, de in spans:
-        rows = disasm(data[ds:de], si)
+        rows = disasm(data[ds:de], si, insts_out, CALIB)
         lines.append(f"--- 段{si} ---")
         for li, r in enumerate(rows):
             lines.append(f"  行{li}: {r}")
@@ -573,6 +617,11 @@ def main():
         lines.append(f"  功能码 {code:02X} → ?{nm}（把握 {conf}）：{why}")
     lines.append("  比较族 ?CMP(关系)：尾字节 00 = / 02 <> / 04 > / 06 < / 08 <= / 0a >=；08、0a 已核对，其余按步长 2 推断。")
     lines.append("  仍未定：以 ?? 开头的功能码（形态不足以推断）、以 ?CMP[ 开头的带码占位（关系码不在上表）。")
+
+    if json_path:
+        os.makedirs(os.path.dirname(os.path.abspath(json_path)), exist_ok=True)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump([{"seg": sg, "line": li, "insts": to_insts(toks)} for sg, li, toks in insts_out], f, ensure_ascii=False)
 
     report = "\n".join(lines)
     if out_dir:

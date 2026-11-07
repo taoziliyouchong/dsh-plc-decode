@@ -73,7 +73,7 @@ export function writeSourcePack({ outd, kind, projName, projFile }) {
   if (has('项目树.md')) nav += `| 项目树.md | ${num(sizeOf('项目树.md'))} B | AI | 项目树 |\n`
   if (kind === 'dvp') {
     nav += `\n## 怎么查（按问题挑一条，别整份读）\n\n`
-    nav += `- 某段指令表 → 按下文「网络行号表」取段（行号＝解码报告里的行，从 1 起）\n`
+    nav += `- 某段梯形图 → \`ladder-dvp\` from=<段号> to=<段号>（段号＝网络号，从 1 起；不是报告行号）\n`
     nav += `- 某地址在哪些网络出现 → grep 地址（如 \`grep -n "D2340" 解码报告.md\`），只读命中的那几行\n`
     nav += `- 找中文注释/设备名 → grep 解码报告.md（dvp 只出这一份文本，不生成 全部字符串.txt）\n\n`
     nav += `## 读法\n\n- **看程序**：台达 DVP 没有 pous/ST，程序就是 \`解码报告.md\` 的指令表（按 \`LD M1000\` 分网络，末尾 END）。\n- **AI**：目录里有 \`程序解读.md\` 就先读它（网络级功能地图＋I/O 表＋机制链＋未确证清单），再回指令表逐段核对。报告里 \`?名\`（如 \`?DRVI\`）与 \`?CMP(关系)\` 是**推断**指令名——报告末尾有「推断对照表」（码／推测名／依据／把握），拿它下结论前先核台达指令表；\`??xx\` 与 \`?CMP[六位]\` 是推断不出、保持未定的。\n- 读之前核对源工程文件修改时间是否与本次解码一致（工程一改，导出即过期）。\n`
@@ -88,7 +88,7 @@ export function writeSourcePack({ outd, kind, projName, projFile }) {
       }
       if (starts.length) {
         const CAP = 50
-        nav += `\n## 网络定位（共 ${starts.length} 个网络；要哪段用 按行号取段，别整份读）\n\n| # | 起始行 | 首条 |\n|---|---|---|\n`
+        nav += `\n## 网络定位（共 ${starts.length} 个网络；要哪段用 ladder-dvp 按段号取（＝上表 #），别整份读）\n\n| # | 报告行 | 首条 |\n|---|---|---|\n`
         for (let k = 0; k < Math.min(starts.length, CAP); k++) {
           const from = starts[k]
           const head = (lines[from - 1] || '').trim().replace(/^行\s*\d+\s*[:：]\s*/, '').slice(0, 46).replace(/\|/g, '\\|')
