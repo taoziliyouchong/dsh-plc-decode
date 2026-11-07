@@ -36,7 +36,7 @@ Prerequisites:
 - DSH desktop app (the plugin runs inside DSH; the Node version follows DSH);
 - Python 3.9+ on `PATH` for `.project` / `.dvp` (standard library only, no `pip install`);
 - Python is not needed for `.smart` / `.smartlib`;
-- requires DSH >= 0.2.1-alpha.3; verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
+- requires DSH >= 0.2.1-alpha.1 (lower bound inferred from the services and slots the plugin uses, all present in alpha.1); verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
 
 ```sh
 dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
