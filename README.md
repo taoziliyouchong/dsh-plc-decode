@@ -105,14 +105,8 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 ### 改归档地址（不用改代码）
 
-在 DSH profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`）末尾加这几行：
+在 DSH profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`）末尾给本插件那一行加 config（只写 `archiveDir`：归档根目录）：
 
-```yaml
-- id: dsh-plc-decode
-  name: dsh-plc-decode
-  config:
-    archiveDir: <归档目录>/解码归档
-```
 
 `archiveDir` 是归档**根目录**：相对路径按当前会话工作区解析，绝对路径原样使用；默认 `解码归档`。改完重启 dsh 生效，`/plc-archive` 可随时查看当前生效值；只想改一次就在解码时传 `outDir`。
 
