@@ -15,8 +15,8 @@ import { join } from 'node:path'
 
 import { apply, inject, name as pluginName } from '../index.js'
 
-const EXPECTED_TOOLS = 12
-const EXPECTED_COMMANDS = 12
+const EXPECTED_TOOLS = 18
+const EXPECTED_COMMANDS = 15
 
 let failed = 0
 const pass = (m) => console.log(`  ok   ${m}`)
@@ -60,9 +60,11 @@ function createShell() {
 
 const tools = new Map()
 const commands = new Map()
+const skillProviders = []
 const ctx = {
   tools: { register: (t) => tools.set(t.name, t) },
   commands: { register: (c) => commands.set(c.name, c) },
+  skills: { registerProvider: (factory) => skillProviders.push(factory) },
   shell: createShell(),
   sandboxPolicy: { resolve: () => undefined },
 }
@@ -100,6 +102,9 @@ function checkRegistrations() {
     if (!cmd.description) fail(`命令 /${cmdName} 缺描述`)
   }
   pass('各命令 handler / description')
+
+  if (skillProviders.length === 0) fail('未注册技能 provider')
+  else pass(`技能 provider ${skillProviders.length} 个`)
 }
 
 async function checkBadFile() {

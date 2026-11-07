@@ -35,7 +35,7 @@
 - DSH 桌面端（插件运行在 DSH 内，Node 版本跟随 DSH）；
 - 解码 `.project` / `.dvp` 需要 Python 3.9+ 在 `PATH` 里（只用标准库，无需 pip 安装）；
 - 解码 `.smart` / `.smartlib` 不需要 Python。
-- 兼容 DSH 0.2.2-rc.1 验证通过；更高版本未验证。
+- 兼容 DSH 0.2.1-alpha.3 ～ 0.2.2-rc.1（本机实际运行验证过的最高版本）；更高版本未验证。
 
 从 GitHub 安装：
 
