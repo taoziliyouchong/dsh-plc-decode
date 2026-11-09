@@ -3,13 +3,13 @@
  *
  * 覆盖三类屏，跟 PLC 侧分开（PLC 工程走 plc-decode）：
  *   ① 西门子 Smart Line（WinCC flexible SMART）工程 `.hmismart`
- *      —— 解码出画面/变量/连接清单；新旧两份出差异报告（起始画面/画面表/画面名/配套文件）。
+ *      —— 数据库直读（主路）：画面/元件/文本/变量；新旧两份出差异报告。
  *   ② 繁易 FStudio / Flexem 工程 `.fsprj`
- *      —— 扫元件文本（按语种分槽）＋出可导入文本库的多语言表。
+ *      —— 画面 / 控件 / 控件地址表。
  *   ③ 威纶通 EasyBuilder Pro 工程 `.emtp` / 编译产物 `.exob`
  *      —— .emtp 加密读不动，改读同目录编译产物 .exob：出画面、文字对象、报警事件与文字库条目。
  *
- * 只读源工程；产物按各自约定落 「<工作区>\解码归档\<工程名>\HMI解码\」或「<工程目录>\多语言产出\」。
+ * 只读源工程；产物按各自约定落 「<工作区>\解码归档\<工程名>\HMI解码\」或「<工程目录>\解码归档\」。
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -22,7 +22,6 @@ const PY = 'python'
 const TIMEOUT_MS = 300_000
 /** 本插件自带资源目录（hmismart 解码器 / hmismart 差异 / FStudio 脚本） */
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'assets')
-const SCRIPT_FSTUDIO = join(ASSETS_DIR, 'fstudio_i18n.py')
 const SCRIPT_FSTUDIO_TABLES = join(ASSETS_DIR, 'fstudio-tables.py')
 const SCRIPT_EBPRO_DECODE = join(ASSETS_DIR, 'ebpro-decode.mjs')
 
@@ -105,18 +104,6 @@ async function runNode(ctx, script, argv, workdir, signal, exec) {
   return out
 }
 
-/** 跑 FStudio 的 Python 脚本（WinError 5 读锁重试一次）。 */
-async function runPy(ctx, argv, workdir, signal, exec) {
-  const command = `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(SCRIPT_FSTUDIO)} ${argv.map(psq).join(' ')}`
-  let r = await runShell(ctx, command, workdir, signal, exec)
-  if (r.exitCode !== 0 && /PermissionError|WinError 5|OSError/.test(`${r.err} ${r.out}`)) {
-    r = await runShell(ctx, command, workdir, signal, exec)
-  }
-  if (r.exitCode !== 0) throw new Error(`python 退出码 ${r.exitCode}\n${r.err || r.out || '(无输出)'}`)
-  return r.out
-}
-
-/** 跑本插件 assets 里的任意 Python 脚本（WinError 5 读锁重试一次）。 */
 // ───────────────────────── 识别 ─────────────────────────
 
 /**
@@ -165,14 +152,34 @@ function requireFstudio(fileOrDir) {
 // ───────────────────────── 西门子 Smart Line .hmismart ─────────────────────────
 
 /**
- * 解码 .hmismart：调 assets/hmismart-decode.mjs（Node）＋ assets/hmismart-report.mjs 出人读报告。
+ * 解码 .hmismart。
+ * 主路：assets/hmismart-db.mjs —— 工程文件本身是 SQL Server MDF，附加到 LocalDB 直查
+ *       HmiBasicTable / HmiTextTable，直接拿到「画面 → 元件 → 文本」的归属链。
+ * 备路：assets/hmismart-decode.mjs —— 二进制扫描（本机无 LocalDB 时兜底，只出无归属的文本与对象名）。
  * 默认产物落「<工作区>\解码归档\<工程名>\HMI解码\」。只读源工程。
  */
 async function decodeHmismart(ctx, file, outDir, base, signal, exec) {
   const target = outDir || join(defaultArchiveDir(file, base), 'HMI解码')
   mkdirSync(target, { recursive: true })
+  const dbDecoder = join(ASSETS_DIR, 'hmismart-db.mjs')
   const decoder = join(ASSETS_DIR, 'hmismart-decode.mjs')
   const reporter = join(ASSETS_DIR, 'hmismart-report.mjs')
+
+  let dbLog = ''
+  if (existsSync(dbDecoder)) {
+    try {
+      dbLog = await runNode(ctx, dbDecoder, [file, target], dirname(target), signal, exec)
+      return {
+        outd: target,
+        text: [
+          dbLog,
+          '下一步: 读 HMI解码报告.md（规模 + 文本最多的画面）；画面｜元件｜文本逐条见 12-文本.tsv，去重后的屏上文本见 15-屏上文本.tsv。',
+        ].filter(Boolean).join('\n'),
+      }
+    } catch (e) {
+      dbLog = `（数据库直读不可用，退回二进制扫描: ${String(e.message || e).split('\n')[0]}）`
+    }
+  }
 
   const decodeLog = await runNode(ctx, decoder, [file, target], dirname(target), signal, exec)
   let reportLog = ''
@@ -186,6 +193,7 @@ async function decodeHmismart(ctx, file, outDir, base, signal, exec) {
   return {
     outd: target,
     text: [
+      dbLog,
       decodeLog,
       reportLog,
       '',
@@ -223,15 +231,6 @@ async function decodeFstudio(ctx, fileOrDir, outDirArg, exec) {
   return { text: out, target }
 }
 
-async function scanFstudio(ctx, fileOrDir, outDirArg, exec) {
-  const proj = requireFstudio(fileOrDir)
-  const outDir = outDirArg ? resolve(outDirArg) : join(proj, '多语言产出')
-  mkdirSync(outDir, { recursive: true })
-  const jsonPath = join(outDir, '元件文本扫描.json')
-  const out = await runPy(ctx, ['scan', proj, jsonPath], sessionBase(exec?.agent), exec?.signal, exec)
-  return `扫描完成：\n${out}\n明细 JSON: ${jsonPath}`
-}
-
 // ───────────────────────── 威纶通 EasyBuilder Pro .emtp / .exob ─────────────────────────
 
 /**
@@ -253,7 +252,7 @@ async function decodeEbpro(ctx, file, outDirArg, exobArg, exec) {
 const SKILLS = [
   {
     name: 'hmi-decode-workflow',
-    description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.srt 项目文本旁路读法、FStudio 多语言入口。接触摸屏（HMI）工程任务时加载。',
+    description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.srt 项目文本旁路读法。接触摸屏（HMI）工程任务时加载。',
     file: 'hmi-decode-workflow.md',
   },
 ]
@@ -269,15 +268,15 @@ const TEXT_OUTPUT = {
 }
 
 export function registerHmi(ctx) {
-  // ── 工具一：触摸屏工程统一入口（.hmismart 解码 / FStudio 文本扫描）──
+  // ── 工具一：触摸屏工程统一入口（.hmismart 解码 / FStudio 画面·控件·地址表）──
   ctx.tools.register({
     name: 'hmi-decode',
-    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 扫元件文本；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略；.emtp / .exob（威纶通 EasyBuilder Pro）→ 画面/文字对象/报警事件/文字库（读编译产物）。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
+    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 画面/控件/控件地址表；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略；.emtp / .exob（威纶通 EasyBuilder Pro）→ 画面/文字对象/报警事件/文字库（读编译产物）。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
     parameters: {
       type: 'object',
       properties: {
         file: { type: 'string', description: '触摸屏工程：.hmismart，或 .fsprj / FStudio 工程目录（含 HMI\\Frame 的那一层），或 .nbp / .mcp / .mcgs / .emtp / .exob。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省 .hmismart 写工作区「解码归档\\<工程文件名>\\HMI解码\\」，FStudio 写 <工程目录>\\多语言产出\\。' },
+        outDir: { type: 'string', description: '可选：输出目录；缺省 .hmismart 写工作区「解码归档\\<工程文件名>\\HMI解码\\」，FStudio 写 <工程目录>\\解码归档\\。' },
       },
       required: ['file'],
       additionalProperties: false,
@@ -308,10 +307,9 @@ export function registerHmi(ctx) {
         return { ok: true, text: `已解码完成（类型: ebpro / 威纶通 EasyBuilder Pro）:\n${text}` }
       }
       const tables = await decodeFstudio(ctx, project, outDir, exec)
-      const scan = await scanFstudio(ctx, project, undefined, exec)
       return {
         ok: true,
-        text: `FStudio 工程（类型: fstudio / Flexem FStudio）:\n${tables.text}\n产物目录: ${tables.target}\n${scan}\n下一步: 要看各语种元件文本明细，用 hmi-decode 对同一工程的扫描输出。`,
+        text: `FStudio 工程（类型: fstudio / Flexem FStudio）:\n${tables.text}\n产物目录: ${tables.target}`,
       }
     },
   })
@@ -372,7 +370,7 @@ export function registerHmi(ctx) {
   // ── 命令一：触摸屏工程入口 ──
   ctx.commands.register({
     name: 'hmi-decode',
-    description: '触摸屏工程入口：.hmismart 解码（画面/变量/连接）/ FStudio 工程文本扫描',
+    description: '触摸屏工程入口：.hmismart 解码（画面/变量/连接）/ FStudio 画面·控件·地址表',
     input: { hint: '<.hmismart 路径 | .fsprj 或 FStudio 工程目录> [输出目录]' },
     handler: async ({ rawInput, agent }) => {
       try {
@@ -384,8 +382,8 @@ export function registerHmi(ctx) {
           const result = await decodeHmismart(ctx, abs, outDir, sessionBase(agent), undefined, { agent })
           return { kind: 'success', text: `已解码完成（类型: hmismart）:\n${result.text}` }
         }
-        const text = await scanFstudio(ctx, project, outDir, { agent })
-        return { kind: 'success', text }
+        const tables = await decodeFstudio(ctx, project, outDir, { agent })
+        return { kind: 'success', text: `已解码完成（类型: fstudio）:\n${tables.text}\n产物目录: ${tables.target}` }
       } catch (error) {
         return ({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
       }

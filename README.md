@@ -23,7 +23,7 @@
 
 | 文件 | 品牌 | 解出 |
 |---|---|---|
-| `.hmismart` | 西门子 WinCC flexible SMART（Smart Line 屏） | 画面 / 元件 / 文本 / 设备表；旁系 `{{GUID}}.data` 里解变量名、控件名、绑定候选、类型表 |
+| `.hmismart` | 西门子 WinCC flexible SMART（Smart Line 屏） | 数据库直读：画面 / 元件 / 文本（带画面归属）/ 变量；本机没有 LocalDB 时退回二进制扫描，只出对象名与无归属文本；旁系 `{{GUID}}.data` 可补变量名、控件名、绑定候选、类型表 |
 | `.fsprj` 或含 `HMI\Frame` 的目录 | 繁易 FStudio / Flexem | 画面 / 控件 / 控件地址（读 `HMI\System\fs2.s3db` 与 `Bin\fshmi.bin`） |
 | `.nbp` | 欧姆龙 NB-Designer | 画面 / 控件 / 地址（XML 直读） |
 | `.mcp` / `.mcgs` | 昆仑通态 MCGS / LSTP Studio | 画面 / 变量 / 报警 / 策略（Access 库） |
@@ -36,6 +36,8 @@
 - DSH 桌面端（插件运行在 DSH 内，Node 版本跟随 DSH）；
 - 解码 `.project` / `.dvp` 需要 Python 3.9+ 在 `PATH` 里（只用标准库，无需 pip 安装）；
 - 解码 `.smart` / `.smartlib` 不需要 Python；
+- `.hmismart` 数据库直读需要本机有 SQL Server LocalDB（WinCC flexible SMART 自带 `WINCCFLEX2022` 实例，没有时试 `MSSQLLocalDB`；都没有就退回二进制扫描）；
+- 生成「画面｜文本」Excel 需要 Python 的 `openpyxl`；
 - 要求 DSH >= 0.2.1-alpha.1（下限按用到的服务与槽在 alpha.1 已存在推定）；实测 0.2.1-alpha.3、0.2.2-rc.1，更高版本未验证。
 
 从 GitHub 安装：
@@ -64,7 +66,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `smart-conflict` | 地址冲突体检：重叠冲突（真冲突 / 疑似 / 仅登记）+ 连续空间被切碎 |
 | `smart-diff-project` | SMART 新旧工程对比：块清单、主程序调用链、I-O 引用、符号表差异 |
 | `codesys-diff-project` | CoDeSys 新旧工程对比：POU 清单、真实逻辑变化区段、空白差异、字符串表、对象表 |
-| `hmi-decode` | 触摸屏统一入口：按文件识别 `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` 并解码 |
+| `hmi-decode` | 触摸屏统一入口：按文件识别 `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` 并解码（`.hmismart` 走数据库直读） |
 | `hmi-diff-project` | 新旧 `.hmismart` 对比：起始画面、画面表、画面名、配套文件 |
 | `ebpro-decode` | 威纶通 EasyBuilder Pro：从编译产物 `.exob` 解画面 / 文字对象 / 报警事件 / 文字库 |
 | `ladder-auto` | 自动出梯形图：直接读 `.smart` 工程，按块（可单网络）生成盒式文字梯形图（`block`、`net`） |
@@ -106,7 +108,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `.project` | `00-索引.md`（先读这份）、`pous/<POU>.txt`（ST 源码）、`工程内容报告.md`、`全部字符串.txt`、`对象表.md`、`项目树.md` |
 | `.dvp` | `00-索引.md`、`解码报告.md`（结构 / 段落注释 / 设备注释 / 指令表）、可选 `程序解读.md` |
 | `.smart` / `.smartlib` | `00-目录.md`（先读这份）、`解码报告.md`、`程序.lad`、`元素记录.tsv`、`符号地址.tsv`、`分析.md`、`记录.json`、`字符串全录.txt` |
-| `.hmismart` | `10-画面.tsv`、`11-元件.tsv`、`12-文本.tsv`、`13-设备.tsv`、`20-变量.data.tsv`、`21-控件.data.tsv`、`23-控件绑定.data.tsv`、`24-类型表.tsv` |
+| `.hmismart` | `HMI解码报告.md`、`00-格式说明.md`、`10-画面.tsv`、`11-元件.tsv`、`12-文本.tsv`、`13-变量.tsv`、`14-对象类型.tsv`、`15-屏上文本.tsv`；无 LocalDB 时退回二进制扫描产物 |
 | `.fsprj` | `画面.tsv`、`控件.tsv`、`控件地址.tsv`、`变量.tsv` |
 | `.nbp` / `.mcp` | `解码报告.md` + 画面/控件（或变量/报警/策略）JSON |
 | `.emtp` / `.exob` | `HMI解码/HMI解码报告.md` + `00-格式说明.md`、`10-画面.tsv`、`11-文字对象.tsv`、`12-报警事件.tsv`、`13-文字库.tsv`、`08-统计.json` |
@@ -130,7 +132,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 ## 已知边界
 
-- 触摸屏工程：`.hmismart` 里只有模板骨架，真实画面与控件在旁系 `{{GUID}}.data`（ES2RT 序列化流），变量名与控件名能解，控件到变量的引用只解出同段共现与 UUID 命中那部分，其余标「未解出」；繁易工程若没建变量，控件地址只在 `Bin\fshmi.bin` 的动作表里；昆仑通态工程需本机有 `.mcp` 样本才能验证。
+- 触摸屏工程：`.hmismart` 是 SQL Server 数据库文件，画面 / 元件 / 文本的归属链从表里 join 出来；本机没有 LocalDB 时退回二进制扫描，只能出对象名与无归属文本，拿不到画面归属。旁系 `{{GUID}}.data`（ES2RT 序列化流）仍可补变量名、控件名与绑定候选。繁易工程若没建变量，控件地址只在 `Bin\fshmi.bin` 的动作表里；昆仑通态工程需本机有 `.mcp` 样本才能验证。
 - 威纶通 EasyBuilder Pro：`.emtp` 本体压缩加密，只能读同工程的编译产物 `.exob`，表里反映的是**编译当时**的工程（工程改过要先重新编译）；编译产物只带源语言，没有译文。画面归属由对象流分段推定，表里的 x/y/w/h 是文字框度量，不是画面坐标。
 - 库块调用区（如 MBUS_MSG 的 Slave / RW / Addr / Count / DataPtr）的引脚级实参解不出，工具会明确说明，不猜。
 - 加密或特殊压缩的工程可能解不出；解码器会报错而不是给出半真结果。
@@ -156,11 +158,14 @@ assets/decode-pack.mjs      解码产物落盘（索引/目录/表格/记录）
 assets/smart-lad.mjs        连线还原脚本（由 smart-lad 工具调用）
 assets/smart-net-trace.mjs  网络轨迹脚本（由 smart-net-trace 工具调用）
 assets/codesys-tools/       CoDeSys / DVP 解码 Python 脚本（只用标准库）
-assets/hmismart-decode.mjs  西门子 .hmismart 解码器（结构表 + .data 名字/绑定/类型表）
+assets/hmismart-db.mjs      .hmismart 数据库直读（附加 LocalDB 查表，出画面/元件/文本/变量）
+assets/hmismart-db.ps1      上一条的 PowerShell 半部（复制 + 附加 + 导出 TSV）
+assets/hmismart-decode.mjs  .hmismart 二进制扫描兜底（结构表 + .data 名字/绑定/类型表）
 assets/hmismart-report.mjs  .hmismart 可读报告（画面/变量/连接）
+assets/hmismart-screen-xlsx.py  「画面｜文本」两列 Excel（读 12-文本.tsv）
+assets/hmi-auto-decode.mjs  触摸屏工程批量入口：判类型 → 调对应解码器 → 出屏幕文本.xlsx
 assets/hmismart-diff.mjs    .hmismart 新旧对比
 assets/fstudio-tables.py    繁易画面 / 控件 / 控件地址表
-assets/fstudio_i18n.py      繁易元件文本扫描（按语种槽）
 assets/hmi-decode-workflow.md  触摸屏解读流程（技能正文）
 assets/nb-decode.mjs        欧姆龙 NB-Designer 解码器
 assets/mcgs-decode.mjs      昆仑通态 MCGS / LSTP 解码器

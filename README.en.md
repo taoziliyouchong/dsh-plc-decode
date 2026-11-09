@@ -23,7 +23,7 @@ Read PLC project files directly inside [DeepSeek Harness](https://github.com/dee
 
 | File | Brand | Decoded |
 |---|---|---|
-| `.hmismart` | Siemens WinCC flexible SMART (Smart Line) | Screens / objects / texts / devices; the sibling `{{GUID}}.data` files yield tag names, control names, binding candidates and the type table |
+| `.hmismart` | Siemens WinCC flexible SMART (Smart Line) | Database direct read: screens / objects / texts (with screen attribution) / tags; without a local LocalDB it falls back to a binary scan that yields only object names and unattributed texts; sibling `{{GUID}}.data` still adds tag names, control names, binding candidates and the type table |
 | `.fsprj` or a folder containing `HMI\Frame` | Flexem FStudio | Screens / controls / control addresses (from `HMI\System\fs2.s3db` and `Bin\fshmi.bin`) |
 | `.nbp` | Omron NB-Designer | Screens / controls / addresses (XML) |
 | `.mcp` / `.mcgs` | MCGS / LSTP Studio | Screens / tags / alarms / strategies (Access database) |
@@ -36,6 +36,8 @@ Prerequisites:
 - DSH desktop app (the plugin runs inside DSH; the Node version follows DSH);
 - Python 3.9+ on `PATH` for `.project` / `.dvp` (standard library only, no `pip install`);
 - Python is not needed for `.smart` / `.smartlib`;
+- `.hmismart` database reading needs SQL Server LocalDB (WinCC flexible SMART ships the `WINCCFLEX2022` instance; `MSSQLLocalDB` is tried next; with neither, decoding falls back to a binary scan);
+- building the screen｜text Excel needs Python `openpyxl`;
 - requires DSH >= 0.2.1-alpha.1 (lower bound inferred from the services and slots the plugin uses, all present in alpha.1); verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
 
 ```sh
@@ -62,7 +64,7 @@ Restart DSH afterwards. The plugin has no npm runtime dependencies.
 | `smart-conflict` | Address conflicts: overlaps (real / suspected / registered only) and fragmented free space |
 | `smart-diff-project` | SMART project diff: block list, call chain, I/O references, symbol table |
 | `codesys-diff-project` | CoDeSys project diff: POU list, real logic changes, whitespace, string table, object table |
-| `hmi-decode` | HMI unified entry: identifies `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` and processes it |
+| `hmi-decode` | HMI unified entry: identifies `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` and processes it (`.hmismart` via database direct read) |
 | `hmi-diff-project` | HMI project diff for two `.hmismart` files: start screen, screen records, screen names, companion files |
 | `ebpro-decode` | Weintek EasyBuilder Pro: decode screens / text objects / alarm events / text library from the compiled `.exob` |
 | `ladder-auto` | Auto ladder: read a `.smart` project and render box-style text ladders per block/network (`block`, `net`) |
@@ -104,7 +106,7 @@ By default the plugin writes to `解码归档/<project folder name>/` in the **w
 | `.project` | `00-索引.md` (read this first), `pous/<POU>.txt` (ST sources), `工程内容报告.md`, `全部字符串.txt`, `对象表.md`, `项目树.md` |
 | `.dvp` | `00-索引.md`, `解码报告.md` (structure / section comments / device comments / instruction table) |
 | `.smart` / `.smartlib` | `00-目录.md` (read this first), `解码报告.md`, `程序.lad`, `元素记录.tsv`, `符号地址.tsv`, `分析.md`, `记录.json`, `字符串全录.txt` |
-| `.hmismart` | `10-画面.tsv`, `11-元件.tsv`, `12-文本.tsv`, `13-设备.tsv`, `20-变量.data.tsv`, `21-控件.data.tsv`, `23-控件绑定.data.tsv`, `24-类型表.tsv` |
+| `.hmismart` | `HMI解码报告.md`, `00-格式说明.md`, `10-画面.tsv`, `11-元件.tsv`, `12-文本.tsv`, `13-变量.tsv`, `14-对象类型.tsv`, `15-屏上文本.tsv`; binary-scan output when no LocalDB |
 | `.fsprj` | `画面.tsv`, `控件.tsv`, `控件地址.tsv`, `变量.tsv` |
 | `.nbp` / `.mcp` | `解码报告.md` plus screen/control (or tag/alarm/strategy) JSON |
 | `.emtp` / `.exob` | `HMI解码/HMI解码报告.md` + `00-格式说明.md`, `10-画面.tsv`, `11-文字对象.tsv`, `12-报警事件.tsv`, `13-文字库.tsv`, `08-统计.json` |
@@ -128,7 +130,7 @@ The smart `记录.json` is the input of the analysis tools (address usage, varia
 
 ## Known limits
 
-- HMI projects: `.hmismart` carries only the template skeleton — real screens and controls live in the sibling `{{GUID}}.data` (ES2RT stream). Tag names and control names can be decoded; control-to-tag references are recovered only for same-segment co-occurrence and UUID hits, the rest is reported as undecoded. Without tags, a FStudio project keeps control addresses only in the action table of `Bin\fshmi.bin`. MCGS decoding needs a sample to verify against.
+- HMI projects: `.hmismart` is a SQL Server database file; the screen / object / text attribution chain comes from joining its tables. Without a local LocalDB, decoding falls back to a binary scan that yields only object names and unattributed texts. Sibling `{{GUID}}.data` (ES2RT stream) still adds tag names, control names and binding candidates. Without tags, a FStudio project keeps control addresses only in the action table of `Bin\fshmi.bin`. MCGS decoding needs a sample to verify against.
 - Weintek EasyBuilder Pro: the `.emtp` body is compressed and encrypted, so only the compiled `.exob` of the same project can be read; the tables reflect the project **at compile time** (recompile first if the project changed). The compiled output carries only the source language, no translations. Screen membership is inferred from object-stream segments; x/y/w/h in the tables are text-box metrics, not screen coordinates.
 - Pin-level arguments of library call boxes (e.g. Slave / RW / Addr / Count / DataPtr of MBUS_MSG) cannot be decoded; the tools say so instead of guessing.
 - Encrypted or specially compressed projects may fail to decode; the decoder reports an error rather than a half-true result.
@@ -154,11 +156,14 @@ assets/decode-pack.mjs       decoded-output writer (indexes, tables, records)
 assets/smart-lad.mjs         ladder reconstruction script (used by smart-lad)
 assets/smart-net-trace.mjs   network trace script (used by smart-net-trace)
 assets/codesys-tools/        CoDeSys / DVP decoding Python scripts (standard library only)
-assets/hmismart-decode.mjs   Siemens .hmismart decoder (structure tables + .data names/bindings)
-assets/hmismart-report.mjs   .hmismart human-readable report (screens/tags/connections)
-assets/hmismart-diff.mjs     .hmismart project diff
-assets/fstudio-tables.py     FStudio screen / control / control-address tables
-assets/fstudio_i18n.py       FStudio element-text scan (per language slot)
+assets/hmismart-db.mjs      .hmismart database direct read (attach LocalDB, screens/objects/texts/tags)
+assets/hmismart-db.ps1      PowerShell half of the above (copy + attach + dump TSVs)
+assets/hmismart-decode.mjs  .hmismart binary-scan fallback (structure tables + .data names/bindings)
+assets/hmismart-report.mjs  .hmismart human-readable report (screens/tags/connections)
+assets/hmismart-screen-xlsx.py  screen｜text Excel (reads 12-文本.tsv)
+assets/hmi-auto-decode.mjs  HMI batch entry: detect type → call the decoder → screen-text xlsx
+assets/hmismart-diff.mjs    .hmismart project diff
+assets/fstudio-tables.py    FStudio screen / control / control-address tables
 assets/hmi-decode-workflow.md  HMI reading workflow (skill text)
 assets/nb-decode.mjs         Omron NB-Designer decoder
 assets/mcgs-decode.mjs       MCGS / LSTP decoder
