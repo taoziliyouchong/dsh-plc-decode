@@ -1,6 +1,6 @@
 {
   "name": "dsh-plc-decode",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "在 DSH 里读工控工程文件：PLC（CoDeSys、台达、西门子 SMART）与触摸屏（西门子 WinCC flexible SMART、繁易 FStudio、欧姆龙 NB、昆仑通态 MCGS、威纶通 EasyBuilder Pro）里的程序、画面、控件、变量与地址，读成能查的报告与表。",
   "type": "module",
   "main": "index.js",
@@ -19,12 +19,6 @@
     "README.en.md",
     "LICENSE"
   ],
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.19.0"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-skill": ">=0.2.1-alpha.3 || >=0.2.2-rc.1"
-  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-alpha.1"
