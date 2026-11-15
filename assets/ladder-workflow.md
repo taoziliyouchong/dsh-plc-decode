@@ -12,6 +12,8 @@
 | 台达 DVP 工程文件 | 工具 `ladder-dvp` | `/ladder-dvp <工程.dvp> [起段] [止段]` |
 | 西门子 S7-200 SMART 工程文件 | 工具 `ladder-auto` | `/ladder-auto <工程.smart> [块名] [网络]` |
 
+> 一次要全部块的图（不只一块）：`node <插件>\assets\pack-ladder.mjs <工程.smart> [输出.txt] [块名]`——按块分段一次出完，盒列宽按实际内容收窄、省 token。
+
 **能拿到工程文件或 STL 就走自动那条**：串并联写在文件里，成图是确定的，不用猜；只有拿不到才走 spec 手写。
 
 ## 二、STL 自动成图

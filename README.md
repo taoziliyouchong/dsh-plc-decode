@@ -4,7 +4,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里直接读 PLC 工程文件：按文件头自动识别格式，把工程解成可读报告与结构化数据，再基于解码结果做新旧对比、地址体检、元素级读/写判定与连线还原。同一插件行里也承接触摸屏（HMI）工程：画面、控件、变量与地址；威纶通 EasyBuilder Pro 读该工程的编译产物，解出画面、文字对象、报警事件与文字库。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里直接读 PLC 工程文件：按文件头自动识别格式，把工程解成可读报告与结构化数据，再基于解码结果做新旧对比、地址体检、元素级读/写判定与连线还原。同一插件行里也承接触摸屏（HMI）工程：画面、控件、变量与地址；威纶通 EasyBuilder Pro 读该工程的编译产物，解出画面、文字对象、报警事件与文字库；台达 DIAScreen 工程解出画面、元件、地址、文字、图片库与内嵌 SQLite 库。
 
 **只读**：解析工程文件，不改动原文件。
 
@@ -28,6 +28,7 @@
 | `.nbp` | 欧姆龙 NB-Designer | 画面 / 控件 / 地址（XML 直读） |
 | `.mcp` / `.mcgs` | 昆仑通态 MCGS / LSTP Studio | 画面 / 变量 / 报警 / 策略（Access 库） |
 | `.emtp` / `.exob` | 威纶通 EasyBuilder Pro | 画面 / 文字对象 / 报警事件 / 文字库（`.emtp` 本体加密，读同工程的编译产物 `.exob`） |
+| `.dpa` | 台达 DIAScreen | 画面 / 元件 / 状态 / 地址绑定 / 文字 / 图片库 / 内嵌 SQLite 库（容器 = BMP 缩略图 + gzip，正文是异或后的 INI） |
 
 ## 安装
 
@@ -38,7 +39,7 @@
 - 解码 `.smart` / `.smartlib` 不需要 Python；
 - `.hmismart` 数据库直读需要本机有 SQL Server LocalDB（WinCC flexible SMART 自带 `WINCCFLEX2022` 实例，没有时试 `MSSQLLocalDB`；都没有就退回二进制扫描）；
 - 生成「画面｜文本」Excel 需要 Python 的 `openpyxl`；
-- 要求 DSH >= 0.2.1-alpha.1（下限按用到的服务与槽在 alpha.1 已存在推定）；实测 0.2.1-alpha.3、0.2.2-rc.1，更高版本未验证。
+- 要求 DSH >= 0.2.1-alpha.1。
 
 从 GitHub 安装：
 
@@ -66,7 +67,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `smart-conflict` | 地址冲突体检：重叠冲突（真冲突 / 疑似 / 仅登记）+ 连续空间被切碎 |
 | `smart-diff-project` | SMART 新旧工程对比：块清单、主程序调用链、I-O 引用、符号表差异 |
 | `codesys-diff-project` | CoDeSys 新旧工程对比：POU 清单、真实逻辑变化区段、空白差异、字符串表、对象表 |
-| `hmi-decode` | 触摸屏统一入口：按文件识别 `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` 并解码（`.hmismart` 走数据库直读） |
+| `hmi-decode` | 触摸屏统一入口：按文件识别 `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` / `.dpa` 并解码（`.hmismart` 走数据库直读） |
 | `hmi-diff-project` | 新旧 `.hmismart` 对比：起始画面、画面表、画面名、配套文件 |
 | `ebpro-decode` | 威纶通 EasyBuilder Pro：从编译产物 `.exob` 解画面 / 文字对象 / 报警事件 / 文字库 |
 | `ladder-auto` | 自动出梯形图：直接读 `.smart` 工程，按块（可单网络）生成盒式文字梯形图（`block`、`net`） |
@@ -90,7 +91,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `/smart-conflict <.smart>` | 地址冲突体检 |
 | `/smart-ladder <.smart> [地址]` | 元素级读/写判定 |
 | `/smart-lad <.smart> [块名] [网络号]` | 连线还原（LAD 指令序列） |
-| `/hmi-decode <.hmismart / .fsprj / .nbp / .mcp / .emtp / .exob> [输出目录]` | 触摸屏工程解码 |
+| `/hmi-decode <.hmismart / .fsprj / .nbp / .mcp / .emtp / .exob / .dpa> [输出目录]` | 触摸屏工程解码 |
 | `/hmi-diff <旧 .hmismart> <新 .hmismart>` | 触摸屏新旧对比 |
 | `/ladder on\|off\|status` | 梯形图开关（默认关闭，立即生效） |
 | `/ladder-auto <.smart> [块名] [网络号] [out.txt]` | 出 `.smart` 的梯形图 |
@@ -112,6 +113,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `.fsprj` | `画面.tsv`、`控件.tsv`、`控件地址.tsv`、`变量.tsv` |
 | `.nbp` / `.mcp` | `解码报告.md` + 画面/控件（或变量/报警/策略）JSON |
 | `.emtp` / `.exob` | `HMI解码/HMI解码报告.md` + `00-格式说明.md`、`10-画面.tsv`、`11-文字对象.tsv`、`12-报警事件.tsv`、`13-文字库.tsv`、`08-统计.json` |
+| `.dpa` | `HMI解码报告.md`、`08-统计.json`、`10-画面.tsv`、`11-元件.tsv`、`12-状态.tsv`、`13-地址表.tsv`、`14-文字.tsv`、`15-变量映射.tsv`、`16-地址引用明细.tsv`、`17-内嵌库.tsv`、`18-二进制清单.tsv`、`19-口令与权限.tsv`、`20-图片/`、`30-宏/`、`90-全量记录.jsonl` |
 
 ### 梯形图（默认关闭）
 
@@ -134,6 +136,7 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 
 - 触摸屏工程：`.hmismart` 是 SQL Server 数据库文件，画面 / 元件 / 文本的归属链从表里 join 出来；本机没有 LocalDB 时退回二进制扫描，只能出对象名与无归属文本，拿不到画面归属。旁系 `{{GUID}}.data`（ES2RT 序列化流）仍可补变量名、控件名与绑定候选。繁易工程若没建变量，控件地址只在 `Bin\fshmi.bin` 的动作表里；昆仑通态工程需本机有 `.mcp` 样本才能验证。
 - 威纶通 EasyBuilder Pro：`.emtp` 本体压缩加密，只能读同工程的编译产物 `.exob`，表里反映的是**编译当时**的工程（工程改过要先重新编译）；编译产物只带源语言，没有译文。画面归属由对象流分段推定，表里的 x/y/w/h 是文字框度量，不是画面坐标。
+- 台达 DIAScreen：元件 `Type` / `SubType` 是控件类型码，没有对照表，按地址与文字判用途；图片是元素贴图，不是整屏截图（整屏外观要按元件坐标拼，不在解码范围）。
 - 库块调用区（如 MBUS_MSG 的 Slave / RW / Addr / Count / DataPtr）的引脚级实参解不出，工具会明确说明，不猜。
 - 加密或特殊压缩的工程可能解不出；解码器会报错而不是给出半真结果。
 - `.smart` 的串/并联拓扑由指令记录还原，已用官方导出的 STL 逐网络回归验证；库调用区（无标准盒头）不在覆盖范围内。
@@ -170,9 +173,11 @@ assets/hmi-decode-workflow.md  触摸屏解读流程（技能正文）
 assets/nb-decode.mjs        欧姆龙 NB-Designer 解码器
 assets/mcgs-decode.mjs      昆仑通态 MCGS / LSTP 解码器
 assets/ebpro-decode.mjs     威纶通 EasyBuilder Pro 解码器（读 .exob）
+assets/dpa-decode.mjs       台达 DIAScreen 解码器（读 .dpa）
 assets/ladder-render.mjs    文字梯形图渲染器（由 ladder-render 调用）
 assets/stl-to-ladder.mjs    STL → 梯形图（由 ladder-from-stl 调用）
 assets/smart-ladder-auto.mjs .smart 自动出图（由 ladder-auto 调用）
+assets/pack-ladder.mjs       .smart 全块打包成一份文字梯形图（批量出图用）
 assets/dvp-ladder.mjs       .dvp 自动出图（由 ladder-dvp 调用）
 scripts/smoke.mjs           冒烟测试
 ```

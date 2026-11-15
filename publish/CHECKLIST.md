@@ -10,7 +10,7 @@ npm run smoke                  # 装载插件 + 核对注册面（工具 19 / �
 npm run smoke -- <工程文件路径>  # 拿一份真实工程跑端到端解码
 ```
 
-端到端这步必做，且最好四种格式各挑一份：`.project` / `.dvp` 走 Python，`.smart` / `.smartlib` 走内嵌解码器，两类路径都覆盖到再发；触摸屏三种入口（`.hmismart` / `.fsprj` / `.emtp`）各跑一次。
+端到端这步必做，且最好四种格式各挑一份：`.project` / `.dvp` 走 Python，`.smart` / `.smartlib` 走内嵌解码器，两类路径都覆盖到再发；触摸屏入口（`.hmismart` / `.fsprj` / `.emtp` / `.dpa`）各跑一次。
 
 ## 0.5 检查打包内容
 
@@ -61,7 +61,7 @@ npm publish --access public
 | 要求 | 本仓库状态 |
 |---|---|
 | `package.json` 声明 `dsh.bundle.patch` | 已声明，指向 `cordis.patch.yml` |
-| 仓库有真实可用代码 | 有（四格式 PLC 解码 + 五类触摸屏解码 + 梯形图渲染；19 个工具 = 1 个 PLC 统一入口 + 11 个分析工具 + 3 个触摸屏工具 + 4 个梯形图工具；20 个命令） |
+| 仓库有真实可用代码 | 有（四格式 PLC 解码 + 六类触摸屏解码 + 梯形图渲染；19 个工具 = 1 个 PLC 统一入口 + 11 个分析工具 + 3 个触摸屏工具 + 4 个梯形图工具；20 个命令） |
 | 仓库满 1 天 | 建库后次日再提 PR |
 | 加 `dsh-plugin` topic | 建库时加 |
 | 描述只说功能、不夸大 | `registry-entry.yml` 已按实际能力写 |

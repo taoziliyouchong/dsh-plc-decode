@@ -4,7 +4,7 @@
 
 [中文](README.md) | **English**
 
-Read PLC project files directly inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): the plugin detects the format from the file header, decodes the project into readable reports and structured data, and provides project diffing, address audits, element-level read/write analysis and ladder-logic reconstruction. The same plugin row also covers HMI projects: screens, controls, tags and addresses; for Weintek EasyBuilder Pro it reads the compiled output of the project and decodes screens, text objects, alarm events and text-library entries.
+Read PLC project files directly inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): the plugin detects the format from the file header, decodes the project into readable reports and structured data, and provides project diffing, address audits, element-level read/write analysis and ladder-logic reconstruction. The same plugin row also covers HMI projects: screens, controls, tags and addresses; for Weintek EasyBuilder Pro it reads the compiled output of the project and decodes screens, text objects, alarm events and text-library entries; for Delta DIAScreen it decodes screens, elements, addresses, texts, the picture bank and the embedded SQLite database.
 
 **Read-only**: project files are parsed, never modified.
 
@@ -28,6 +28,7 @@ Read PLC project files directly inside [DeepSeek Harness](https://github.com/dee
 | `.nbp` | Omron NB-Designer | Screens / controls / addresses (XML) |
 | `.mcp` / `.mcgs` | MCGS / LSTP Studio | Screens / tags / alarms / strategies (Access database) |
 | `.emtp` / `.exob` | Weintek EasyBuilder Pro | Screens / text objects / alarm events / text library (the `.emtp` body is encrypted; the plugin reads the compiled `.exob` of the same project) |
+| `.dpa` | Delta DIAScreen | Screens / elements / states / address bindings / texts / picture bank / embedded SQLite database (container = BMP thumbnail + gzip, body is XOR-ed INI) |
 
 ## Install
 
@@ -38,7 +39,7 @@ Prerequisites:
 - Python is not needed for `.smart` / `.smartlib`;
 - `.hmismart` database reading needs SQL Server LocalDB (WinCC flexible SMART ships the `WINCCFLEX2022` instance; `MSSQLLocalDB` is tried next; with neither, decoding falls back to a binary scan);
 - building the screen｜text Excel needs Python `openpyxl`;
-- requires DSH >= 0.2.1-alpha.1 (lower bound inferred from the services and slots the plugin uses, all present in alpha.1); verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
+- requires DSH >= 0.2.1-alpha.1.
 
 ```sh
 dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
@@ -64,7 +65,7 @@ Restart DSH afterwards. The plugin has no npm runtime dependencies.
 | `smart-conflict` | Address conflicts: overlaps (real / suspected / registered only) and fragmented free space |
 | `smart-diff-project` | SMART project diff: block list, call chain, I/O references, symbol table |
 | `codesys-diff-project` | CoDeSys project diff: POU list, real logic changes, whitespace, string table, object table |
-| `hmi-decode` | HMI unified entry: identifies `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` and processes it (`.hmismart` via database direct read) |
+| `hmi-decode` | HMI unified entry: identifies `.hmismart` / `.fsprj` / `.nbp` / `.mcp` / `.emtp` / `.exob` / `.dpa` and processes it (`.hmismart` via database direct read) |
 | `hmi-diff-project` | HMI project diff for two `.hmismart` files: start screen, screen records, screen names, companion files |
 | `ebpro-decode` | Weintek EasyBuilder Pro: decode screens / text objects / alarm events / text library from the compiled `.exob` |
 | `ladder-auto` | Auto ladder: read a `.smart` project and render box-style text ladders per block/network (`block`, `net`) |
@@ -88,7 +89,7 @@ Restart DSH afterwards. The plugin has no npm runtime dependencies.
 | `/smart-conflict <.smart>` | Address conflict audit |
 | `/smart-ladder <.smart> [address]` | Element-level read/write judgement |
 | `/smart-lad <.smart> [block] [network]` | Ladder reconstruction (LAD instruction sequence) |
-| `/hmi-decode <.hmismart / .fsprj / .nbp / .mcp / .emtp / .exob> [outDir]` | HMI project decode |
+| `/hmi-decode <.hmismart / .fsprj / .nbp / .mcp / .emtp / .exob / .dpa> [outDir]` | HMI project decode |
 | `/hmi-diff <old .hmismart> <new .hmismart>` | HMI project diff |
 | `/ladder on\|off\|status` | Ladder switch (off by default; takes effect immediately) |
 | `/ladder-auto <.smart> [block] [net] [out.txt]` | Render a `.smart` project |
@@ -110,6 +111,7 @@ By default the plugin writes to `解码归档/<project folder name>/` in the **w
 | `.fsprj` | `画面.tsv`, `控件.tsv`, `控件地址.tsv`, `变量.tsv` |
 | `.nbp` / `.mcp` | `解码报告.md` plus screen/control (or tag/alarm/strategy) JSON |
 | `.emtp` / `.exob` | `HMI解码/HMI解码报告.md` + `00-格式说明.md`, `10-画面.tsv`, `11-文字对象.tsv`, `12-报警事件.tsv`, `13-文字库.tsv`, `08-统计.json` |
+| `.dpa` | `HMI解码报告.md`, `08-统计.json`, `10-画面.tsv`, `11-元件.tsv`, `12-状态.tsv`, `13-地址表.tsv`, `14-文字.tsv`, `15-变量映射.tsv`, `16-地址引用明细.tsv`, `17-内嵌库.tsv`, `18-二进制清单.tsv`, `19-口令与权限.tsv`, `20-图片/`, `30-宏/`, `90-全量记录.jsonl` |
 
 ### Ladder rendering (off by default)
 
@@ -132,6 +134,7 @@ The smart `记录.json` is the input of the analysis tools (address usage, varia
 
 - HMI projects: `.hmismart` is a SQL Server database file; the screen / object / text attribution chain comes from joining its tables. Without a local LocalDB, decoding falls back to a binary scan that yields only object names and unattributed texts. Sibling `{{GUID}}.data` (ES2RT stream) still adds tag names, control names and binding candidates. Without tags, a FStudio project keeps control addresses only in the action table of `Bin\fshmi.bin`. MCGS decoding needs a sample to verify against.
 - Weintek EasyBuilder Pro: the `.emtp` body is compressed and encrypted, so only the compiled `.exob` of the same project can be read; the tables reflect the project **at compile time** (recompile first if the project changed). The compiled output carries only the source language, no translations. Screen membership is inferred from object-stream segments; x/y/w/h in the tables are text-box metrics, not screen coordinates.
+- Delta DIAScreen: element `Type` / `SubType` are widget type codes with no published table, so the tools judge usage from addresses and texts instead of naming them. Pictures are element bitmaps, not screen captures (assembling the full screen from element coordinates is out of scope).
 - Pin-level arguments of library call boxes (e.g. Slave / RW / Addr / Count / DataPtr of MBUS_MSG) cannot be decoded; the tools say so instead of guessing.
 - Encrypted or specially compressed projects may fail to decode; the decoder reports an error rather than a half-true result.
 - Ladder series/parallel topology is reconstructed from instruction records (validated network-by-network against official STL exports); library call regions without standard box headers are not covered.
@@ -168,9 +171,11 @@ assets/hmi-decode-workflow.md  HMI reading workflow (skill text)
 assets/nb-decode.mjs         Omron NB-Designer decoder
 assets/mcgs-decode.mjs       MCGS / LSTP decoder
 assets/ebpro-decode.mjs      Weintek EasyBuilder Pro decoder (from .exob)
+assets/dpa-decode.mjs        Delta DIAScreen decoder (from .dpa)
 assets/ladder-render.mjs     text-ladder renderer (used by ladder-render)
 assets/stl-to-ladder.mjs     STL → ladder (used by ladder-from-stl)
 assets/smart-ladder-auto.mjs .smart auto renderer (used by ladder-auto)
+assets/pack-ladder.mjs       pack every block of a .smart project into one text-ladder file (batch rendering)
 assets/dvp-ladder.mjs        .dvp auto renderer (used by ladder-dvp)
 scripts/smoke.mjs            smoke test
 ```

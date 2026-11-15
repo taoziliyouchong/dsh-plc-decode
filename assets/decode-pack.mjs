@@ -176,7 +176,8 @@ export function writeSmartPack({ out, projName, fingerprint, container, version,
   }
   dir += `\n## 怎么查（按问题挑一条，别整份读文件）\n\n`
   dir += `- 某地址谁写谁读 → \`smart-ladder-elements\` addr=VD20（一批用逗号）\n`
-  dir += `- 某块某网络的梯形图 → \`smart-lad\` block=自动 net=3\n`
+  dir += `- 某块某网络的梯形图 → \`ladder-auto\` block=自动 net=3\n`
+  dir += `- 某块的指令序列（串并联/边沿/比较）→ \`smart-lad\` block=自动 net=3\n`
   dir += `- 子程序内部结构（参数/盒链/调用点）→ \`smart-pou-structure\` pou=<块名>\n`
   dir += `- 地址规划与空闲段 → \`smart-free-space\`；地址冲突体检 → \`smart-conflict\`\n`
   dir += `- 字节级核对（排查用，出偏移）→ \`smart-net-trace\` / \`smart-box-pins\`\n`
@@ -187,7 +188,7 @@ export function writeSmartPack({ out, projName, fingerprint, container, version,
   dir += `| 分析.md | ${num(B(anaTxt))} B | 信号流/空闲段/静态体检等算出来的结论 | 要结论时读 |\n`
   dir += `| 记录.json | ${num(sizeOf('记录.json'))} B | 兄弟工具的输入（含偏移与全量记录） | AI 不读 |\n`
   dir += `| 字符串全录.txt | ${num(sizeOf('字符串全录.txt'))} B | 工程内全部可读串 | 查关键词时才 grep |\n`
-  dir += `\n梯形图不落盘：按需用 smart-lad 取某块某网络的指令序列（串并联/边沿/比较）。\n`
+  dir += `\n梯形图不落盘，在对话里出（ladder-auto，可指定块与网络）。\n`
   fs.writeFileSync(path.join(out, '00-目录.md'), dir, 'utf8')
 
   // ── 指路页：保留 解码报告.md 这个名字（兄弟工具按它认目录），内容只留指路 ──

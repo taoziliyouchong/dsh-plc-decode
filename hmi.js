@@ -1,13 +1,17 @@
 /**
  * hmi-decode —— 触摸屏（HMI）工程入口
  *
- * 覆盖三类屏，跟 PLC 侧分开（PLC 工程走 plc-decode）：
+ * 覆盖六类屏，跟 PLC 侧分开（PLC 工程走 plc-decode）：
  *   ① 西门子 Smart Line（WinCC flexible SMART）工程 `.hmismart`
  *      —— 数据库直读（主路）：画面/元件/文本/变量；新旧两份出差异报告。
  *   ② 繁易 FStudio / Flexem 工程 `.fsprj`
  *      —— 画面 / 控件 / 控件地址表。
  *   ③ 威纶通 EasyBuilder Pro 工程 `.emtp` / 编译产物 `.exob`
  *      —— .emtp 加密读不动，改读同目录编译产物 .exob：出画面、文字对象、报警事件与文字库条目。
+ *   ④ 台达 DIAScreen 工程 `.dpa`
+ *      —— 容器 = BMP 缩略图 + gzip；正文是异或后的 INI；出画面/元件/状态/地址/文字/图片/内嵌 SQLite 库。
+ *   ⑤ 欧姆龙 NB-Designer `.nbp` 与昆仑通态 MCGS `.mcp`·`.mcgs`
+ *      —— XML 直读 / Access 库直读：画面、控件、变量、报警。
  *
  * 只读源工程；产物按各自约定落 「<工作区>\解码归档\<工程名>\HMI解码\」或「<工程目录>\解码归档\」。
  */
@@ -24,6 +28,7 @@ const TIMEOUT_MS = 300_000
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'assets')
 const SCRIPT_FSTUDIO_TABLES = join(ASSETS_DIR, 'fstudio-tables.py')
 const SCRIPT_EBPRO_DECODE = join(ASSETS_DIR, 'ebpro-decode.mjs')
+const SCRIPT_DPA_DECODE = join(ASSETS_DIR, 'dpa-decode.mjs')
 
 // ───────────────────────── 通用工具 ─────────────────────────
 
@@ -123,6 +128,8 @@ function identify(file) {
   if (low.endsWith('.mcp') || low.endsWith('.mcgs') || low.endsWith('.mcp.mcgs')) return { kind: 'mcgs', abs }
   // 威纶通 EasyBuilder Pro：.emtp 工程本体加密读不动，解码取同工程编译产物 .exob
   if (low.endsWith('.emtp') || low.endsWith('.exob')) return { kind: 'ebpro', abs }
+  // 台达 DIAScreen：扩展名 .dpa（容器 = BMP 缩略图 + gzip）
+  if (low.endsWith('.dpa')) return { kind: 'dpa', abs }
   if (existsSync(join(abs, 'HMI', 'Frame'))) return { kind: 'fstudio', project: abs }
   const head = readFileSync(abs).subarray(0, 4)
   if (head.length === 4 && head[0] === 0x01 && head[1] === 0x0F && head[2] === 0x00 && head[3] === 0x00) {
@@ -130,7 +137,7 @@ function identify(file) {
   }
   throw new Error(
     `不是可识别的触摸屏工程（前 4 字节: ${[...head].map(b => b.toString(16).padStart(2, '0')).join(' ')}）: ${file}\n`
-    + '支持: .hmismart（西门子 WinCC flexible SMART）/ .fsprj 或含 HMI\\Frame 的 FStudio 工程目录 / .nbp（欧姆龙 NB）/ .mcp·.mcgs（MCGS）/ .emtp·.exob（威纶通 EasyBuilder Pro）。\n'
+    + '支持: .hmismart（西门子 WinCC flexible SMART）/ .fsprj 或含 HMI\\Frame 的 FStudio 工程目录 / .nbp（欧姆龙 NB）/ .mcp·.mcgs（MCGS）/ .emtp·.exob（威纶通 EasyBuilder Pro）/ .dpa（台达 DIAScreen）。\n'
     + '提示: PLC 工程（.project / .dvp / .smart / .smartlib）请用 plc-decode。'
   )
 }
@@ -247,12 +254,24 @@ async function decodeEbpro(ctx, file, outDirArg, exobArg, exec) {
   return `${out}\n产物目录: ${target}\n先读 HMI解码报告.md；原始表在 10-画面.tsv / 11-文字对象.tsv / 12-报警事件.tsv / 13-文字库.tsv。`
 }
 
+/**
+ * 台达 DIAScreen 工程解码：.dpa 容器 = BMP 缩略图 + gzip，正文是异或 0x64 的 INI，
+ * 出画面/元件/状态/地址/文字/图片/内嵌 SQLite 库。默认产物落「<工作区>\解码归档\<工程名>\HMI解码\」。只读源文件。
+ */
+async function decodeDpa(ctx, file, outDirArg, exec) {
+  const abs = resolve(file)
+  const target = outDirArg ? resolve(outDirArg) : join(defaultArchiveDir(abs, sessionBase(exec?.agent)), 'HMI解码')
+  mkdirSync(target, { recursive: true })
+  const out = await runNode(ctx, SCRIPT_DPA_DECODE, [abs, target], dirname(target), exec?.signal, exec)
+  return `${out}\n产物目录: ${target}\n先读 HMI解码报告.md；查某个地址在不在屏上，grep 13-地址表.tsv；文字在 14-文字.tsv；按钮图在 20-图片/。`
+}
+
 // ───────────────────────── 注册面 ─────────────────────────
 
 const SKILLS = [
   {
     name: 'hmi-decode-workflow',
-    description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.srt 项目文本旁路读法。接触摸屏（HMI）工程任务时加载。',
+    description: '触摸屏工程读取工作流：.hmismart 全解（画面/变量/连接）与新旧差异、.dpa 台达 DIAScreen 解码、.srt 项目文本旁路读法。接触摸屏（HMI）工程任务时加载。',
     file: 'hmi-decode-workflow.md',
   },
 ]
@@ -271,12 +290,12 @@ export function registerHmi(ctx) {
   // ── 工具一：触摸屏工程统一入口（.hmismart 解码 / FStudio 画面·控件·地址表）──
   ctx.tools.register({
     name: 'hmi-decode',
-    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 画面/控件/控件地址表；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略；.emtp / .exob（威纶通 EasyBuilder Pro）→ 画面/文字对象/报警事件/文字库（读编译产物）。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
+    description: '触摸屏/组态（HMI）工程统一入口：.hmismart（西门子 WinCC flexible SMART）→ 画面/变量/连接；.fsprj 或含 HMI\\Frame 的 FStudio 工程目录 → 画面/控件/控件地址表；.nbp（欧姆龙 NB-Designer，XML）→ 画面/控件/地址；.mcp / .mcgs（MCGS·LSTP Studio，Access 库）→ 画面/变量/报警/策略；.emtp / .exob（威纶通 EasyBuilder Pro）→ 画面/文字对象/报警事件/文字库（读编译产物）；.dpa（台达 DIAScreen）→ 画面/元件/状态/地址/文字/图片/内嵌 SQLite 库。用户提供触摸屏或组态工程文件、要求读取/理解/核对其内容时调用。只读，不改动工程文件。PLC 工程请用 plc-decode。',
     parameters: {
       type: 'object',
       properties: {
-        file: { type: 'string', description: '触摸屏工程：.hmismart，或 .fsprj / FStudio 工程目录（含 HMI\\Frame 的那一层），或 .nbp / .mcp / .mcgs / .emtp / .exob。' },
-        outDir: { type: 'string', description: '可选：输出目录；缺省 .hmismart 写工作区「解码归档\\<工程文件名>\\HMI解码\\」，FStudio 写 <工程目录>\\解码归档\\。' },
+        file: { type: 'string', description: '触摸屏工程：.hmismart，或 .fsprj / FStudio 工程目录（含 HMI\\Frame 的那一层），或 .nbp / .mcp / .mcgs / .emtp / .exob / .dpa。' },
+        outDir: { type: 'string', description: '可选：输出目录；缺省 .hmismart 与其余格式写工作区「解码归档\\<工程文件名>\\HMI解码\\」，FStudio 写 <工程目录>\\解码归档\\。' },
       },
       required: ['file'],
       additionalProperties: false,
@@ -305,6 +324,10 @@ export function registerHmi(ctx) {
       if (kind === 'ebpro') {
         const text = await decodeEbpro(ctx, abs, outDir, undefined, exec)
         return { ok: true, text: `已解码完成（类型: ebpro / 威纶通 EasyBuilder Pro）:\n${text}` }
+      }
+      if (kind === 'dpa') {
+        const text = await decodeDpa(ctx, abs, outDir, exec)
+        return { ok: true, text: `已解码完成（类型: dpa / 台达 DIAScreen）:\n${text}` }
       }
       const tables = await decodeFstudio(ctx, project, outDir, exec)
       return {
@@ -370,17 +393,21 @@ export function registerHmi(ctx) {
   // ── 命令一：触摸屏工程入口 ──
   ctx.commands.register({
     name: 'hmi-decode',
-    description: '触摸屏工程入口：.hmismart 解码（画面/变量/连接）/ FStudio 画面·控件·地址表',
-    input: { hint: '<.hmismart 路径 | .fsprj 或 FStudio 工程目录> [输出目录]' },
+    description: '触摸屏工程入口：.hmismart 解码（画面/变量/连接）/ FStudio 画面·控件·地址表 / .dpa 台达 DIAScreen 全量解码',
+    input: { hint: '<.hmismart 路径 | .fsprj 或 FStudio 工程目录 | .dpa> [输出目录]' },
     handler: async ({ rawInput, agent }) => {
       try {
         const parts = splitArgs(rawInput)
-        if (parts.length < 1) return ({ kind: 'error', text: '用法: /hmi-decode <.hmismart | .fsprj | FStudio 工程目录> [输出目录]（带空格路径请加引号）' })
+        if (parts.length < 1) return ({ kind: 'error', text: '用法: /hmi-decode <.hmismart | .fsprj | FStudio 工程目录 | .dpa> [输出目录]（带空格路径请加引号）' })
         const outDir = parts[1] ? resolve(parts[1]) : undefined
         const { kind, abs, project } = identify(parts[0])
         if (kind === 'hmismart') {
           const result = await decodeHmismart(ctx, abs, outDir, sessionBase(agent), undefined, { agent })
           return { kind: 'success', text: `已解码完成（类型: hmismart）:\n${result.text}` }
+        }
+        if (kind === 'dpa') {
+          const text = await decodeDpa(ctx, abs, outDir, { agent })
+          return { kind: 'success', text: `已解码完成（类型: dpa / 台达 DIAScreen）:\n${text}` }
         }
         const tables = await decodeFstudio(ctx, project, outDir, { agent })
         return { kind: 'success', text: `已解码完成（类型: fstudio）:\n${tables.text}\n产物目录: ${tables.target}` }
