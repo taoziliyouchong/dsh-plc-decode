@@ -17,7 +17,10 @@ const OPID = {
   532: '=', 534: 'S', 536: 'R',
   588: 'LDW=', 589: 'LW=', 590: 'OW=', 591: 'W=',
   592: 'LDW<>', 600: 'LDW>', 601: 'LW>', 602: 'LDW<', 603: 'LW<',
-  604: 'OW>', 605: 'OW<', 606: 'OW<>', 607: 'OW>=', 608: 'OW<=',
+  // 606/607/608 是双字等于比较的三档，不是 OW 系：用 Micro/WIN 导出的 STL 回归，
+  // `LDD= VD1000, VD1362`／`AD= …`／`OD= …` 逐条对上这三档。
+  606: 'LDD=', 607: 'AD=', 608: 'OD=',
+  604: 'OW>', 605: 'OW<',
   700: 'CTU_PV', 730: '*I', 736: 'INCW', 781: 'MOVW', 855: 'TON',
 }
 // 结构指令记录里那一个字节
@@ -136,7 +139,12 @@ function extract(A, B) {
         const ins = OPID[opid]
         if (ins) {
           let extra = ''
-          if (/^LDW|^LW|^OW|^W/.test(ins) && /[<>=]/.test(ins)) { const c = constAfter(p); if (c !== null) extra = ', ' + c }
+          if (/^LDD|^AD|^OD|^LDW|^LW|^OW|^W/.test(ins) && /[<>=]/.test(ins)) {
+            const c = constAfter(p); if (c !== null) extra = ', ' + c
+            // 关系符由 OPID 表查得；表里每个号仍以导出的 STL 回归为准，原始 opcode 一并输出，
+            // 与软件不一致时直接拿这个号定位表项，不凭关系符下结论。
+            extra += ` [op ${opid}]`
+          }
           recs.push({ p, idx, ins, arg: arg0 + extra })
           continue
         }
@@ -269,7 +277,7 @@ for (let k = 0; k < blocks.length; k++) {
   nets.forEach((n, i) => {
     if (wantNet && String(i + 1) !== wantNet) return
     out.push(`Network ${i + 1}`)
-    // 注意：齐序号缺口：那些位次是指令盒（盒有独立记录，不产生元件行）
+    // 补齐序号缺口：那些位次是指令盒（盒有独立记录，不产生元件行）
     const idxs = n.filter(r => !r.slot && r.idx >= 0).map(r => r.idx)
     const lo = idxs.length ? Math.min(...idxs) : -1
     const hi = idxs.length ? Math.max(...idxs) : -1
@@ -293,6 +301,7 @@ for (let k = 0; k < blocks.length; k++) {
 }
 console.log([
   '# 说明：本表是 LAD 指令序列（= 串/并联结构）：LD/A/O/AN/ON 触点、EU/ED 边沿、LPS/LRD/LPP 并联支路、=/S/R 线圈、LDW>/OW< 等比较（带第二操作数）。',
+  '# 比较触点行尾的 [op N] 是原始 opcode：关系符由 OPID 表查得，与软件不一致时以软件为准，拿这个号定位表项。',
   '# 指令盒（含库调用 CALL）不产生元件行：网络内位次缺号处标 [盒]；盒的实参用 smart-box-pins 或软件里的 CALL 行读。',
   '',
   ...out,
