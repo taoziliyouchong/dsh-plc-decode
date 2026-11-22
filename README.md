@@ -74,6 +74,11 @@ dsh plugin --profile web add github:taoziliyouchong/dsh-plc-decode
 | `ladder-dvp` | 台达 `.dvp` 工程 → 文字梯形图，可只出某几行 |
 | `ladder-from-stl` | 语句表（STL）→ 文字梯形图 + 每个网络的机械讲解 |
 | `ladder-render` | 把网络描述（spec JSON）渲染成固定版式的文字梯形图 |
+| `dvp-structure` | 台达 `.dvp` 程序结构：几段、每段起首指令、条件/输出/指令条数 |
+| `dvp-nets` | 某段（或全部）的逐条指令，带序号 |
+| `dvp-device-usage` | 某器件（`M100` / `D200` / `T0`）在第几段第几条指令出现 |
+| `dvp-free-space` | 器件占用与连续空闲段：加功能该用哪个地址 |
+| `dvp-diff` | 新旧两个 `.dvp` 差在哪：段数、指令数、首个不同指令 |
 
 ### 斜杠命令（人直接执行）
 

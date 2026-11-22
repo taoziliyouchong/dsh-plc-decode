@@ -15,7 +15,7 @@ import { join } from 'node:path'
 
 import { apply, inject, name as pluginName } from '../index.js'
 
-const EXPECTED_TOOLS = 19
+const EXPECTED_TOOLS = 24
 const EXPECTED_COMMANDS = 20
 
 let failed = 0
@@ -94,6 +94,11 @@ function checkRegistrations() {
     if (!tool.description || tool.description.length < 10) fail(`工具 ${toolName} 缺描述`)
     const schema = tool.parameters
     if (!schema || schema.type !== 'object' || typeof schema.properties !== 'object') fail(`工具 ${toolName} 参数 schema 不合法`)
+  }
+  // DVP 专项工具必须全在：一个问一件事，少了就等于退回整份报告。
+  const DVP_TOOLS = ['dvp-structure', 'dvp-nets', 'dvp-device-usage', 'dvp-free-space', 'dvp-diff']
+  for (const name of DVP_TOOLS) {
+    if (!tools.has(name)) fail(`缺 DVP 专项工具 ${name}`)
   }
   if (!failed) pass('各工具 execute / description / 参数 schema')
 

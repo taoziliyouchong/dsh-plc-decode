@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * smart-ladder-auto.mjs —— .smart 工程 → 盒式文字梯形图（自动出图）
  *
@@ -47,7 +47,7 @@ export function parseLadText(text) {
 
 /* ---------- 指令 → 触点/盒/线圈 ---------- */
 
-const CMP_RE = /^(L|A|O)(W|D)?(<>|<=|>=|=|<|>)$/
+const CMP_RE = /^(LD|A|O)(B|W|D)?(<>|<=|>=|=|<|>)$/
 const RAIL_PASS = /^(SM0\.0|Always_On|First_Scan_On)$/i
 
 /** 一个触点的文字画法：地址在左、触点符号在右 */
@@ -71,7 +71,7 @@ function applyIns(line, st) {
   const m = line.match(/^(\S+)\s*(.*)$/)
   if (!m) return null
   const op = m[1]
-  const args = m[2] ? m[2].split(',').map((s) => s.trim()) : []
+  const args = m[2] ? m[2].replace(/ \[op \d+\]/g, '').split(',').map((s) => s.trim()) : []
 
   const cm = op.match(CMP_RE)
   if (cm) {
@@ -118,7 +118,10 @@ export function netToSpec(no, lines) {
       rows.push({ wire: st.cur || '──', coil: r.coil })
       st.cur = st.stack.length ? st.stack[st.stack.length - 1] : ''
     } else if (r.kind === 'box') {
-      rows.push({ wire: st.cur || '──', box: { name: r.name, pins: [{ name: 'EN', src: 'cond' }] } })
+      const pins = [{ name: 'EN', src: 'cond' }]
+      const argTxt = r.tail || ''
+      if (argTxt) pins.push({ name: '', src: argTxt })
+      rows.push({ wire: st.cur || '──', box: { name: r.name, pins } })
       st.cur = st.stack.length ? st.stack[st.stack.length - 1] : ''
     }
   }

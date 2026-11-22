@@ -19,15 +19,16 @@ const B = (s) => Buffer.byteLength(s, 'utf8')
 const off4 = (o) => String(o || '').replace(/^0x/, '').toUpperCase()
 const num = (n) => Number(n || 0).toLocaleString('en-US')
 
-/** LAD 指令序列压成 AI 件：[盒] 那行长注释换成 [盒N]，去掉尾部空白 */
+/** LAD 指令序列压成 AI 件：去掉 smart-lad 的 # 注释行，块标题压成 ## */
 export function compactLad(raw) {
   let t = raw
-    .replace(/^# 说明：[\s\S]*?\n# 指令盒[^\n]*\n/m, '')
+    .split('\n')
+    .filter(ln => !ln.startsWith('# '))
+    .join('\n')
     .replace(/^## 块：/gm, '## ')
-    .replace(/\[盒\]\s+← 位次 (\d+)（指令盒记录，未列元件行）/g, '[盒$1]')
     .replace(/[ \t]+$/gm, '')
   return '# LAD 指令序列：LD/A/O/AN/ON 触点、EU/ED 边沿、LPS/LRD/LPP 并联支路、=/S/R 线圈、比较带第二操作数\n'
-    + '# [盒N] = 该位次是指令盒，盒内实参见 元素记录.tsv 同一块的行\n\n' + t.trimStart()
+    + '# 指令盒与子程序调用已带实参（盒名 + 操作数，常数按出现顺序排在地址之后），与触点/线圈按文件顺序混排\n\n' + t.trimStart()
 }
 
 /** 从原报告里切出「算出来的」分析节（记录类的 2 与 2.5 不要——那是记录的第二遍） */

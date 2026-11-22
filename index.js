@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PLC 工程文件解码插件（DeepSeek Harness / Cordis）
  *
  * 一个入口承载多品牌 PLC 工程文件的解码与分析：
@@ -311,6 +311,125 @@ async function decodeDvpText(ctx, dvpPath, signal, exec) {
   const result = await runPy(ctx, 'dvp_decode.py', [abs, ...calibArgs()], dir, signal, exec)
   if (!result.ok) throw new Error(result.text)
   return { abs, dir, text: result.text }
+}
+
+// ─────────────── 台达 DVP 专项工具（对标 smart-*，2026-11-22 新增） ───────────────
+// 统一入口 plc-decode 只给总报告；这几个是「问一件事」的专项工具。
+// 后端：assets\codesys-tools\dvp_tools.py（按需加载，只读工程文件）。
+
+function registerDvpTools(ctx) {
+  /** 跑 dvp_tools.py 的一个子命令，返回 stdout 文本。 */
+  async function runDvpTool(argv, signal, exec, workdir) {
+    const result = await runPy(ctx, 'dvp_tools.py', argv, workdir, signal, exec)
+    if (!result.ok) throw new Error(result.text)
+    return result.text
+  }
+
+/** 五个专项工具共用的参数/输出外壳。 */
+  function dvpToolShell(name, description, props, required, build) {
+    return {
+    name,
+    description,
+    parameters: {
+      type: 'object',
+      properties: props,
+      required,
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          text: { type: 'string' },
+        },
+        required: ['ok', 'text'],
+        additionalProperties: false,
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text }],
+    },
+    async execute(args, exec) {
+      const { argv, workdir } = build(args)
+      const text = await runDvpTool(argv, exec.signal, exec, workdir)
+      return { ok: true, text }
+    },
+  }
+  }
+
+const DVP_FILE_PROP = {
+  type: 'string',
+  description: '.dvp 工程文件的路径（绝对路径，或相对当前工作目录）。',
+}
+
+ctx.tools.register(dvpToolShell(
+  'dvp-structure',
+  '列出台达 DVP 工程（.dvp）的程序结构：共几段、每段起首指令、条件/输出/指令条数、指令总数。用于「这个工程由哪些段组成、哪段最大」这类问题，比整份解码报告更聚焦。只读。',
+  { file: DVP_FILE_PROP },
+  ['file'],
+  (args) => {
+    const abs = requireDvp(String(args.file || '').trim(), '需要一个 .dvp 工程文件路径')
+    return { argv: ['structure', abs], workdir: dirname(abs) }
+  },
+))
+
+ctx.tools.register(dvpToolShell(
+  'dvp-device-usage',
+  '查台达 DVP 工程（.dvp）里某个器件的全部引用点：器件名（M100 / D200 / T0 / X14）→ 出现在第几段第几条指令，附器件类型。用于「这个继电器在哪用到」「谁在写 D200」这类问题。只读。',
+  {
+    file: DVP_FILE_PROP,
+    device: { type: 'string', description: '器件名，形如 M100 / D200 / T0 / X14 / C1。' },
+  },
+  ['file', 'device'],
+  (args) => {
+    const abs = requireDvp(String(args.file || '').trim(), '需要一个 .dvp 工程文件路径')
+    const dev = String(args.device || '').trim()
+    if (!dev) throw new Error('参数 device 不能为空（形如 M100 / D200）')
+    return { argv: ['usage', abs, dev], workdir: dirname(abs) }
+  },
+))
+
+ctx.tools.register(dvpToolShell(
+  'dvp-free-space',
+  '统计台达 DVP 工程（.dvp）的器件占用与空闲：X/Y/M/S/T/C/D 各自已用几个、最大号、容量估算，并列出 M 与 D 的连续空闲段（≥8 个号的段）。用于「加功能该用哪个地址」「还有哪些空闲寄存器」这类问题。只读。',
+  { file: DVP_FILE_PROP },
+  ['file'],
+  (args) => {
+    const abs = requireDvp(String(args.file || '').trim(), '需要一个 .dvp 工程文件路径')
+    return { argv: ['free', abs], workdir: dirname(abs) }
+  },
+))
+
+ctx.tools.register(dvpToolShell(
+  'dvp-diff',
+  '对比新旧两个台达 DVP 工程（.dvp）：段数变化、每段指令数变化、首个不同指令及其位置。用于「这份改了什么」「新旧版差在哪」这类问题。只读，不改动任何工程文件。',
+  {
+    old: { type: 'string', description: '旧工程 .dvp 路径。' },
+    new: { type: 'string', description: '新工程 .dvp 路径。' },
+  },
+  ['old', 'new'],
+  (args) => {
+    const a = requireDvp(String(args.old || '').trim(), '需要旧 .dvp 工程路径')
+    const b = requireDvp(String(args.new || '').trim(), '需要新 .dvp 工程路径')
+    return { argv: ['diff', a, b], workdir: dirname(a) }
+  },
+))
+
+ctx.tools.register(dvpToolShell(
+  'dvp-nets',
+  '展开台达 DVP 工程（.dvp）的网络明细：按段列出全部指令（带序号）。传 seg 只看某一段。用于「第 N 段到底写了什么」「把这段指令逐条列出来」。只读。',
+  {
+    file: DVP_FILE_PROP,
+    seg: { type: 'number', description: '可选：只看第几段（从 1 起）。不传则列出全部段。' },
+  },
+  ['file'],
+  (args) => {
+    const abs = requireDvp(String(args.file || '').trim(), '需要一个 .dvp 工程文件路径')
+    const argv = ['nets', abs]
+    if (typeof args.seg === 'number' && args.seg > 0) argv.push(String(Math.floor(args.seg)))
+    return { argv, workdir: dirname(abs) }
+  },
+))
+
 }
 
 // ───────────────────────── SMART（内嵌增强版解码器） ─────────────────────────
@@ -2654,6 +2773,7 @@ async function runDiff(ctx, oldP, newP, signal, base) {
 // ───────────────────────── 应用注册 ─────────────────────────
 
 export function apply(ctx, config = {}) {
+  registerDvpTools(ctx)
   // 2026-11-05：读插件配置的归档根目录（config.archiveDir）。不配置时保持旧行为不变。
   const cfg = config && typeof config === 'object' ? config : {}
   if (typeof cfg.archiveDir === 'string' && cfg.archiveDir.trim()) ARCHIVE_ROOT = cfg.archiveDir.trim()

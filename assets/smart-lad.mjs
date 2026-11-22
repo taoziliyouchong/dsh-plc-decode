@@ -1,6 +1,6 @@
 // smart-lad.mjs —— 从 S7-200 SMART .smart 直接还原每个块的「LAD 指令序列」（= 串/并联结构），不依赖软件导出 STL
 //
-// 原理（破解，用导出的 .awl 逐网络回归验证 16/16）：
+// 原理（2026-09-18 破解，用导出的 .awl 逐网络回归验证 16/16）：
 //   · 每个元件记录 = [u32 序号][u16 操作码][9B 头][9B 实例][载荷]；序号 = 该指令在网络里的位次
 //   · 结构指令（LPS/LRD/LPP/EU/ED）单独成记录：[u32 序号][1B 操作码][02 01 01 00 00]
 //   · 比较指令的第二个操作数（常数）紧跟其后：[01 02 <len> 01][u32 值]
@@ -11,17 +11,27 @@ import zlib from 'node:zlib'
 
 const AREA = { 1: 'I', 2: 'Q', 0x10: 'V', 0x20: 'M', 0x40: 'T', 0x80: 'C', 0x200: 'SM', 0x2000: 'L' }
 const TY = { 1: 'bit', 2: 'byte', 4: 'word', 8: 'dword' }
-// 操作码表（验证）：元件记录第二个 u16
+// 操作码表：只放「元素类型」这一层（触点／线圈／盒）。比较指令不查表，按语法算（见 cmpName）。
 const OPID = {
   510: 'LD', 511: 'A', 512: 'O', 513: 'ON', 514: 'AN',
   532: '=', 534: 'S', 536: 'R',
-  588: 'LDW=', 589: 'LW=', 590: 'OW=', 591: 'W=',
-  592: 'LDW<>', 600: 'LDW>', 601: 'LW>', 602: 'LDW<', 603: 'LW<',
-  // 606/607/608 是双字等于比较的三档，不是 OW 系：用 Micro/WIN 导出的 STL 回归，
-  // `LDD= VD1000, VD1362`／`AD= …`／`OD= …` 逐条对上这三档。
-  606: 'LDD=', 607: 'AD=', 608: 'OD=',
-  604: 'OW>', 605: 'OW<',
   700: 'CTU_PV', 730: '*I', 736: 'INCW', 781: 'MOVW', 855: 'TON',
+}
+
+/**
+ * 比较指令的助记符按语法算，不查对照表：
+ * 比较操作码是连续三块（字节 570 起 / 字 588 起 / 双字 606 起），每块 18 个 =
+ * 6 个关系（= <> >= <= > <）× 3 个栈操作（LD / A / O）。
+ * 例：570+9 = 579 → 字节块、第 4 个关系 <=、第 1 个栈操作 LD → LDB<=。
+ * 语法是否成立由 tools 侧的 smart-opcal.mjs 拿 STL 导出逐条核对；核对不过时解码器不打名字，只给 ?opNNN。
+ */
+function cmpName(op) {
+  if (op < 570 || op > 623) return null
+  const i = op - 570
+  const size = ['B', 'W', 'D'][Math.floor(i / 18)]
+  const rel = ['=', '<>', '>=', '<=', '>', '<'][Math.floor((i % 18) / 3)]
+  const stack = ['LD', 'A', 'O'][i % 3]
+  return stack + size + rel
 }
 // 结构指令记录里那一个字节
 const CTRL = { 0x0b: 'EU', 0x0d: 'ED', 0x11: 'LPS', 0x12: 'LRD', 0x13: 'LPP' }
@@ -82,6 +92,61 @@ function constAfter(p, limit = 0x40) {      // 比较指令的第二个操作数
   return null
 }
 
+/**
+ * 指令盒记录（2026-11-21 解出，此前的版本只给它留 [盒] 占位）：
+ *   01 01 00 00 00 <位次 1B> 02 03 01 <模板ID> 01 <模板ID> 01 00 02 00 03 00 <盒名 ASCII\0>
+ *   盒名固定从 p+18 起；模板 ID 段（p+9..p+17，两个 ID 相同）用来把真盒与「引脚名续段」(EN/IN1/PT…)
+ *   区分开——续段没有这一段，只有引脚名。
+ * 实参：窗口内 02 00 <type> <area:4LE> <addr:4LE> = 地址、01 02|01 <len> 01 <u32> = 常数，
+ *   按出现顺序即为该盒的实参序列（IN → OUT）。
+ */
+function boxAt(p) {
+  if (!(d[p] === 1 && d[p + 1] === 1 && d[p + 2] === 0 && d[p + 3] === 0 && d[p + 4] === 0 && d[p + 7] === 3 && d[p + 8] === 1)) return null
+  if (!(d[p + 9] === d[p + 11] && d[p + 10] === 1 && d[p + 12] === 1 && d[p + 13] === 0 && d[p + 14] === 2 && d[p + 15] === 0 && d[p + 16] === 3 && d[p + 17] === 0)) return null
+  let q = p + 18, name = ''
+  while (q < Math.min(p + 40, d.length) && /[A-Za-z0-9_]/.test(String.fromCharCode(d[q]))) { name += String.fromCharCode(d[q]); q++ }
+  if (name.length < 2 || name.length > 16 || d[q] !== 0) return null
+  let end = p + 9
+  for (let r = p + 9; r < Math.min(p + 0x180, d.length); r++) {
+    const isRec = d[r] === 1 && d[r + 1] === 1 && d[r + 2] <= 2 && d[r + 3] === 0 && d[r + 4] === 0 && d[r + 7] === 3 && d[r + 8] === 1
+    if (isRec || (d[r] === 0xe9 && d[r + 1] === 3 && d[r + 3] === 1 && d[r + 5] === 2)) { end = r; break }
+    end = r
+  }
+  const args = []
+  for (let i = p + 9; i + 11 <= end; i++) {
+    if (d[i] === 2 && d[i + 1] === 0 && TY[d[i + 2]] && AREA[d.readUInt32LE(i + 3)]) {
+      args.push(addrOf(d[i + 2], d.readUInt32LE(i + 3), d.readUInt32LE(i + 7))); i += 10; continue
+    }
+    if (d[i] === 1 && (d[i + 1] === 2 || d[i + 1] === 1) && [1, 2, 4, 8].includes(d[i + 2]) && d[i + 3] === 1) {
+      const v = d.readUInt32LE(i + 4)
+      if (v < 100000000) { args.push(String(v)); i += 6 }
+    }
+  }
+  // 调用盒：窗口尾（或窗口内）是 E9 03 记录时带出被调块名
+  let callee = null
+  for (let r = p + 9; r + 9 < end; r++) {
+    if (d[r] === 0xe9 && d[r + 1] === 3 && d[r + 3] === 1 && d[r + 5] === 2 && d[r + 6] === 9 && d[r + 7] === 3 && d[r + 8] === 0) {
+      let q2 = r + 9
+      while (q2 < Math.min(r + 49, d.length) && d[q2] !== 0) q2++
+      if (d[q2] === 0) { callee = gbk.decode(d.subarray(r + 9, q2)); break }
+    }
+  }
+  const ins = callee ? 'CALL' : name
+  const arg = callee ? [callee, ...args].join(', ') : args.join(', ')
+  return { p, idx: -1, ins, arg, slot: true, box: true, end }
+}
+
+/** 子程序调用：E9 03 <xx> 01 00 02 09 03 00 <块名 GBK\0> */
+function callAt(p) {
+  if (!(d[p] === 0xe9 && d[p + 1] === 3 && d[p + 3] === 1 && d[p + 5] === 2 && d[p + 6] === 9 && d[p + 7] === 3 && d[p + 8] === 0)) return null
+  let q = p + 9
+  while (q < Math.min(p + 9 + 40, d.length) && d[q] !== 0) q++
+  if (d[q] !== 0) return null
+  const name = gbk.decode(d.subarray(p + 9, q)).replace(/\0+$/, '')
+  if (!name || name.length > 40) return null
+  return { p, idx: -1, ins: 'CALL', arg: name, slot: true, call: true, end: q + 1 }
+}
+
 /** 槽式网络的标记块：单字节 P/N/S/R，后面跟 ≥16 个 0 */
 function markBefore(p) {
   const hits = []
@@ -120,6 +185,12 @@ function extract(A, B) {
   for (let p = A; p < B; p++) if (isHeadP(p)) { const mk = markBefore(p); if (mk[0]) coilAt.push(p) }
   const recs = []
   for (let p = A; p < B; p++) {
+    // 指令盒（2026-11-21：不再跳过，盒名＋实参一起解出）
+    const bx = boxAt(p)
+    if (bx) { recs.push(bx); p = bx.end - 1; continue }
+    // 子程序调用（盒头之外的独立 E9 记录）
+    const cl = callAt(p)
+    if (cl) { recs.push(cl); p = cl.end - 1; continue }
     // 结构指令
     if (d[p + 5] === 0x02 && d[p + 6] === 0x01 && d[p + 7] === 0x01 && d[p + 8] === 0x00 && d[p + 9] === 0x00 && CTRL[d[p + 4]]) {
       recs.push({ p, idx: d.readUInt32LE(p), ins: CTRL[d[p + 4]], arg: '' })
@@ -136,14 +207,19 @@ function extract(A, B) {
       const arg0 = operand(p)
       if (y === 1 && arg0) {
         const opid = d.readUInt16LE(p - 2), idx = d.readUInt32LE(p - 6)
-        const ins = OPID[opid]
+        let ins = cmpName(opid) || OPID[opid]
+        // 比较段里算不出名字的（越界/语法不符）：按 opcode 原样输出，绝不静默丢弃
+        if (!ins && opid >= 570 && opid <= 623) ins = '?op' + opid
         if (ins) {
           let extra = ''
-          if (/^LDD|^AD|^OD|^LDW|^LW|^OW|^W/.test(ins) && /[<>=]/.test(ins)) {
+          if (/^\/?\?op/.test(ins) || (/[<>=]/.test(ins) && !/^(S|R|=)$/.test(ins))) {
             const c = constAfter(p); if (c !== null) extra = ', ' + c
-            // 关系符由 OPID 表查得；表里每个号仍以导出的 STL 回归为准，原始 opcode 一并输出，
-            // 与软件不一致时直接拿这个号定位表项，不凭关系符下结论。
+            // 比较触点的关系符按语法算（cmpName）；语法是否成立由 smart-opcal 拿导出 STL 逐条核对，
+            // 对不上时以软件为准。把原始 opcode 一并输出，定位时拿这个号。
             extra += ` [op ${opid}]`
+          } else if (/^MOV/.test(ins)) {
+            // 传送类元件的第二操作数（OUT）紧跟第一个操作数之后，此前只输出 IN
+            const c = constAfter(p); if (c !== null) extra = ', ' + c
           }
           recs.push({ p, idx, ins, arg: arg0 + extra })
           continue
@@ -180,16 +256,19 @@ function extract(A, B) {
   return recs
 }
 
-const BLOCKMARK = /^[\u4e00-\u9fa5][\u4e00-\u9fa5A-Za-z0-9_]{1,39}$/
+// 块标记：`0D 00 <len u16> <GBK 名>`，名字是标识符，且名字后紧跟 ≥6 个 0
+// （块清单记录尾部全 0；同 tag 的普通字符串记录尾部非 0）。不依赖任何工程的块名清单。
+const BLOCKMARK = /^[\u4e00-\u9fa5A-Za-z_][\u4e00-\u9fa5A-Za-z0-9_]{0,39}$/
 function findBlocks() {
   const marks = []
-  for (let i = 0; i < d.length - 6;) {
+  for (let i = 0; i < d.length - 12;) {
     if (d[i] === 0x0d && d[i + 1] === 0x00) {
       const ln = d[i + 2] | (d[i + 3] << 8)
-      if (ln > 0 && ln < 40 && i + 4 + ln <= d.length) {
+      if (ln > 0 && ln < 40 && i + 4 + ln + 6 <= d.length) {
         const nm = gbk.decode(d.subarray(i + 4, i + 4 + ln)).trim()
-        if (BLOCKMARK.test(nm)) marks.push({ off: i, name: nm })
-        i += 4 + ln; continue
+        let zeros = 0
+        for (let q = i + 4 + ln; q < i + 4 + ln + 6; q++) if (d[q] === 0) zeros++
+        if (nm && BLOCKMARK.test(nm) && zeros >= 6) { marks.push({ off: i, name: nm }); i += 4 + ln; continue }
       }
     }
     i += 1
@@ -205,12 +284,12 @@ for (let k = 0; k < blocks.length; k++) {
   if (wantBlock && b.name !== wantBlock) continue
   const end = k + 1 < blocks.length ? blocks[k + 1].off : d.length
   const recs = extract(b.off, end)
-  if (!recs.length) continue
+  if (!recs.length) { out.push(`## 块：${b.name}`, '（本块内没有可识别的指令记录）'); continue }
   // 槽式/符号副本去重：与附近（±0x1000）"地址形式指令"完全相同的，视为存档副本
   const realRecs = recs.filter(r => !r.slot)
   const dropSet = new Set()
   recs.forEach((r, i) => {
-    if (!r.slot || r.marker) return
+    if (!r.slot || r.marker || r.box) return
     const raw = r.arg.startsWith('"') ? (sym.get(r.arg.slice(1, -1)) || r.arg) : r.arg.split(',')[0].trim()
     const win = /^(S|R|=)$/.test(r.ins) ? 0x3000 : 0x500
     if (realRecs.some(o => o.ins === r.ins && o.arg.split(',')[0].trim() === raw && Math.abs(o.p - r.p) < win)) dropSet.add(i)
@@ -224,16 +303,19 @@ for (let k = 0; k < blocks.length; k++) {
   for (const r of recs2) {
     // 紧跟的"同操作数 + 同指令"副本（存档第二份）不算指令
     const prev = keep[keep.length - 1]
-    if (r.slot && prev && prev.arg === r.arg && prev.ins === r.ins) continue
+    if (r.slot && !r.box && !r.call && prev && prev.arg === r.arg && prev.ins === r.ins) continue
     keep.push(r)
   }
   for (let i = 0; i < keep.length; i++) {
     const r = keep[i], p = keep[i - 1]
+    // 指令盒 / 子程序调用：纯按文件顺序落在当前网络，不参与网络边界判定
+    // （2026-11-21：盒此前被当成「槽式条目」对待，导致每个盒后都切出一个新网络）
+    if (r.box || r.call) { cn.push(r); continue }
     if (!r.slot) {
       // 打包网络：序号回退，或刚从槽式段出来 → 新网络
-      if (r.idx <= last || (p && p.slot)) { nets.push(cn); cn = []; last = -1 }
+      if (r.idx <= last || (p && p.slot && !p.box && !p.call)) { nets.push(cn); cn = []; last = -1 }
       last = r.idx
-    } else if (p && !p.slot && keep[i + 1] && keep[i + 1].slot && keep[i + 2] && keep[i + 2].slot && keep[i + 3] && keep[i + 3].slot) {
+    } else if (p && !p.slot && keep[i + 1] && keep[i + 1].slot && !keep[i + 1].box && !keep[i + 1].call && keep[i + 2] && keep[i + 2].slot && !keep[i + 2].box && keep[i + 3] && keep[i + 3].slot && !keep[i + 3].box) {
       // 打包 → 槽式（连续三条以上才算一个槽式网络）：槽式网络自成一格
       nets.push(cn); cn = []; last = -1
     }
@@ -246,7 +328,7 @@ for (let k = 0; k < blocks.length; k++) {
     if (!real.length) continue
     for (let i = n.length - 1; i >= 0; i--) {
       const r = n[i]
-      if (!r.slot || r.marker) continue
+      if (!r.slot || r.marker || r.box) continue
       const raw = r.arg.startsWith('"') ? (sym.get(r.arg.slice(1, -1)) || r.arg) : r.arg.split(',')[0].trim()
       if (real.some(o => o.ins === r.ins && o.arg.split(',')[0].trim() === raw)) n.splice(i, 1)
     }
@@ -277,32 +359,15 @@ for (let k = 0; k < blocks.length; k++) {
   nets.forEach((n, i) => {
     if (wantNet && String(i + 1) !== wantNet) return
     out.push(`Network ${i + 1}`)
-    // 补齐序号缺口：那些位次是指令盒（盒有独立记录，不产生元件行）
-    const idxs = n.filter(r => !r.slot && r.idx >= 0).map(r => r.idx)
-    const lo = idxs.length ? Math.min(...idxs) : -1
-    const hi = idxs.length ? Math.max(...idxs) : -1
-    const have = new Set(idxs)
-    let shown = []
-    for (const r of n) {
-      if (!r.slot && r.idx >= 0) shown.push({ at: r.idx, line: `${r.ins.padEnd(6)} ${r.arg}`.trimEnd() })
-      else shown.push({ at: -1, line: `${r.ins.padEnd(6)} ${r.arg}`.trimEnd() })
-    }
-    // 在同一网络内按位次插入缺口的占位行（槽式行保持原位）
-    const outLines = []
-    let k = 0
-    for (let t = lo; t >= 0 && t <= hi; t++) {
-      while (k < shown.length && shown[k].at === -1) { outLines.push(shown[k].line); k++ }
-      if (!have.has(t)) { outLines.push(`[盒]    ← 位次 ${t}（指令盒记录，未列元件行）`); continue }
-      if (k < shown.length && shown[k].at === t) { outLines.push(shown[k].line); k++ }
-    }
-    while (k < shown.length) { outLines.push(shown[k].line); k++ }
-    out.push(...outLines)
+    // 2026-11-21：指令盒与子程序调用已带实参解出，按文件偏移顺序与触点/线圈混排输出，
+    // 不再补「[盒] ← 位次 N」占位（盒自己就是一条记录，实参就在记录内）。
+    out.push(...n.map(r => `${r.ins.padEnd(6)} ${r.arg}`.trimEnd()))
   })
 }
 console.log([
   '# 说明：本表是 LAD 指令序列（= 串/并联结构）：LD/A/O/AN/ON 触点、EU/ED 边沿、LPS/LRD/LPP 并联支路、=/S/R 线圈、LDW>/OW< 等比较（带第二操作数）。',
-  '# 比较触点行尾的 [op N] 是原始 opcode：关系符由 OPID 表查得，与软件不一致时以软件为准，拿这个号定位表项。',
-  '# 指令盒（含库调用 CALL）不产生元件行：网络内位次缺号处标 [盒]；盒的实参用 smart-box-pins 或软件里的 CALL 行读。',
+  '# 比较触点行尾的 [op N] 是原始 opcode：关系符按语法算，用 smart-opcal <工程.smart> <导出.awl> 逐条核对；与软件不一致时以软件为准，拿这个号定位。',
+  '# 指令盒与子程序调用已带实参输出（盒名 + 操作数，常数按出现顺序排在地址之后），与触点/线圈按文件顺序混排。',
   '',
   ...out,
 ].join('\n'))
