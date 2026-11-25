@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -52,16 +53,23 @@ const DVP_DECODER = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'cod
 let CTX = null
 function psq(v) { return `'${String(v).replace(/'/g, "''")}'` }
 async function runPy(script, argv, workdir, exec) {
-  const policy = CTX?.sandboxPolicy && exec?.agent ? CTX.sandboxPolicy.resolve({ session: exec.agent.session }) : undefined
-  const spec = CTX.shell.resolve({
-    command: `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(script)} ${argv.map(psq).join(' ')}`,
-    workdir,
-    timeoutMs: 300000,
-    ...(policy ? { sandboxPolicy: policy } : {}),
-    ...(exec?.signal ? { signal: exec.signal } : {}),
-  })
-  const res = await (await CTX.shell.execute(spec)).result()
-  return { out: String(res.stdout?.text ?? '').trim(), err: String(res.stderr?.text ?? '').trim(), exitCode: res.exitCode }
+  const command = `$env:PYTHONIOENCODING='utf-8'; & ${PY} ${psq(script)} ${argv.map(psq).join(' ')}`
+  if (CTX?.shell?.resolve && CTX?.shell?.execute) {
+    const policy = CTX?.sandboxPolicy && exec?.agent ? CTX.sandboxPolicy.resolve({ session: exec.agent.session }) : undefined
+    const spec = CTX.shell.resolve({
+      command,
+      workdir,
+      timeoutMs: 300000,
+      ...(policy ? { sandboxPolicy: policy } : {}),
+      ...(exec?.signal ? { signal: exec.signal } : {}),
+    })
+    const res = await (await CTX.shell.execute(spec)).result()
+    return { out: String(res.stdout?.text ?? '').trim(), err: String(res.stderr?.text ?? '').trim(), exitCode: res.exitCode }
+  }
+  // 宿主没有 shell 服务时回退：直接起 pwsh 子进程
+  const ps = spawnSync('pwsh', ['-NoProfile', '-Command', command], { cwd: workdir, timeout: 300000, encoding: 'utf8', windowsHide: true })
+  const errOut = String(ps.stderr ?? '').trim() || (ps.error ? String(ps.error.message) : '')
+  return { out: String(ps.stdout ?? '').trim(), err: errOut, exitCode: typeof ps.status === 'number' ? ps.status : 1 }
 }
 async function decodeDvpToJson(file, exec) {
   const abs = resolve(file)

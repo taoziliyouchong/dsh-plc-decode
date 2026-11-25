@@ -1,10 +1,13 @@
-# hmismart-db.ps1 - attach a copy of a .hmismart (SQL Server MDF) to LocalDB and dump tables.
+# hmismart-db.ps1 - dump tables from a .hmismart project (SQL Server MDF).
 #
-# Why: a .hmismart project file IS a SQL Server database (8192-byte pages, header 01 0F 00 00).
-# The screen -> element -> text chain lives in HmiBasicTable.ParentId; texts are in
-# HmiTextTable.Language0..31. Reading the binary by hand cannot recover that chain.
+# Two paths:
+#   A) WinCC already has the project open: WinCC attaches the file to
+#      (localdb)\WINCCFLEX2022 as S_<project>_<hash> and holds an exclusive
+#      file lock. Read that attached database in place - no copy, no attach.
+#   B) Otherwise: copy the file to a temp folder, attach the copy with
+#      FOR ATTACH_REBUILD_LOG, dump, detach, delete the temp copy.
 #
-# The source file is never modified: it is copied to a temp folder first.
+# The source file is never modified.
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File hmismart-db.ps1 -Source <proj.hmismart> -Out <dir> [-Instance WINCCFLEX2022]
@@ -26,20 +29,15 @@ $Out = (Resolve-Path -LiteralPath $Out).Path
 
 $fi = Get-Item -LiteralPath $src
 $pageOK = ($fi.Length % 8192 -eq 0)
+$baseName = [IO.Path]::GetFileNameWithoutExtension($src)
 
-# ---- copy (share-read so a running WinCC does not block us) ----
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("hmimdf_" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$mdf = Join-Path $tmp "project.mdf"
-$fsIn = [IO.File]::Open($src, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
-$fsOut = [IO.File]::Create($mdf)
-try { $fsIn.CopyTo($fsOut, 1048576) } finally { $fsOut.Close(); $fsIn.Close() }
-Set-ItemProperty -LiteralPath $mdf -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-
+$tmp = $null
+$mdf = $null
 $dbName = "HMIDEC_" + [guid]::NewGuid().ToString("N").Substring(0, 8)
-$connected = $false
+$owned = $false
 $conn = $null
 $cs = ""
+$attachedDb = $null
 
 function Write-Tsv([string]$fileName, [string]$sql) {
     $cmd = $conn.CreateCommand(); $cmd.CommandTimeout = $TimeoutSec
@@ -66,6 +64,21 @@ function Write-Tsv([string]$fileName, [string]$sql) {
     Write-Host ("  {0}: {1} rows" -f $fileName, ($lines.Count - 1))
 }
 
+# Look for a database WinCC attached for this project: S_<file base name>_<hash>.
+function Find-AttachedDb([string]$baseName) {
+    $cmd = $conn.CreateCommand(); $cmd.CommandTimeout = 60
+    $cmd.CommandText = "SELECT name FROM sys.databases"
+    $rd = $cmd.ExecuteReader()
+    $hit = $null
+    try {
+        while ($rd.Read()) {
+            $nm = [string]$rd.GetValue(0)
+            if ($nm.StartsWith("S_" + $baseName, [StringComparison]::OrdinalIgnoreCase)) { $hit = $nm; break }
+        }
+    } finally { $rd.Close() }
+    return $hit
+}
+
 try {
     $cs = "Server=(localdb)\$Instance;Integrated Security=true;Connection Timeout=120"
     try { $conn = New-Object System.Data.SqlClient.SqlConnection $cs; $conn.Open() }
@@ -73,11 +86,33 @@ try {
         $cs = "Server=(localdb)\MSSQLLocalDB;Integrated Security=true;Connection Timeout=120"
         $conn = New-Object System.Data.SqlClient.SqlConnection $cs; $conn.Open()
     }
-    $cmd = $conn.CreateCommand(); $cmd.CommandTimeout = $TimeoutSec
-    $cmd.CommandText = "CREATE DATABASE [$dbName] ON (FILENAME=N'$mdf') FOR ATTACH_REBUILD_LOG"
-    [void]$cmd.ExecuteNonQuery()
-    $conn.ChangeDatabase($dbName)
-    $connected = $true
+
+    $attachedDb = Find-AttachedDb $baseName
+    if ($attachedDb) {
+        # Path A: read the database WinCC already attached. Skip the file copy:
+        # WinCC holds an exclusive lock, copying the source would fail.
+        $conn.ChangeDatabase($attachedDb)
+        $cmd = $conn.CreateCommand(); $cmd.CommandTimeout = 60
+        $cmd.CommandText = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"
+        [void]$cmd.ExecuteNonQuery()
+        Write-Host ("using attached database: " + $attachedDb)
+    } else {
+        # Path B: private copy + attach.
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("hmimdf_" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $mdf = Join-Path $tmp "project.mdf"
+        $fsIn = [IO.File]::Open($src, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $fsOut = [IO.File]::Create($mdf)
+        try { $fsIn.CopyTo($fsOut, 1048576) } finally { $fsOut.Close(); $fsIn.Close() }
+        Set-ItemProperty -LiteralPath $mdf -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+
+        $cmd = $conn.CreateCommand(); $cmd.CommandTimeout = $TimeoutSec
+        $cmd.CommandText = "CREATE DATABASE [$dbName] ON (FILENAME=N'$mdf') FOR ATTACH_REBUILD_LOG"
+        [void]$cmd.ExecuteNonQuery()
+        $conn.ChangeDatabase($dbName)
+        $owned = $true
+        Write-Host ("attached private copy: " + $dbName)
+    }
 
     Write-Tsv "10-screen.tsv" @"
 SELECT b.ObjName AS screen,
@@ -128,8 +163,13 @@ ORDER BY s.ObjName, si.LocationY, si.LocationX
 "@
 
     Write-Tsv "13-tag.tsv" @"
-SELECT b.ObjName AS tag, b.DeviceNumber AS device_number
+SELECT b.ObjName AS tag,
+       a.Address AS address,
+       a.PlcId AS plc,
+       a.DataType AS data_type
 FROM HmiBasicTable b
+LEFT JOIN HmiTagTable t ON t.TagId = b.ObjId
+LEFT JOIN HmiAddressTable a ON a.Id = t.AddressId
 WHERE b.ObjTypeCode = 1179361025 AND b.Deleted = 0
 ORDER BY b.ObjName
 "@
@@ -146,7 +186,7 @@ ORDER BY COUNT(1) DESC
     Write-Error ("attach/query failed: " + $_.Exception.Message)
     throw
 } finally {
-    if ($connected -and $cs) {
+    if ($owned -and $cs) {
         try {
             $c2 = New-Object System.Data.SqlClient.SqlConnection $cs; $c2.Open()
             $cc = $c2.CreateCommand(); $cc.CommandTimeout = 300
@@ -155,7 +195,9 @@ ORDER BY COUNT(1) DESC
         } catch { Write-Warning ("drop database failed: " + $_.Exception.Message) }
     }
     if ($conn -and $conn.State -ne "Closed") { $conn.Close() }
-    try { Remove-Item -LiteralPath $tmp -Recurse -Force } catch {}
+    if ($tmp -and (Test-Path -LiteralPath $tmp)) { try { Remove-Item -LiteralPath $tmp -Recurse -Force } catch {} }
 }
 
-Write-Host ("DONE pages8192={0}" -f $pageOK)
+$mode = "copy"
+if ($attachedDb) { $mode = "attached" }
+Write-Host ("DONE pages8192={0} mode={1}" -f $pageOK, $mode)
